@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap');
+@import url('https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css');
+
+:root {
+  /* Main brand colors - warm yarn */
+  --primary-50: 249 245 241;
+  --primary-100: 240 233 224;
+  --primary-200: 228 213 195;
+  --primary-300: 212 185 158;
+  --primary-400: 194 156 125;
+  --primary-500: 178 127 92;
+  --primary-600: 160 108 78;
+  --primary-700: 132 84 66;
+  --primary-800: 107 68 56;
+  --primary-900: 90 58 49;
+  
+  /* Secondary brand colors - crochet blue */
+  --accent-50: 243 249 251;
+  --accent-100: 218 240 247;
+  --accent-200: 181 225 239;
+  --accent-300: 128 205 227;
+  --accent-400: 76 179 211;
+  --accent-500: 42 153 188;
+  --accent-600: 36 122 151;
+  --accent-700: 36 99 120;
+  --accent-800: 36 81 98;
+  --accent-900: 32 69 83;
+  
+  /* Neutrals */
+  --neutral-50: 248 249 250;
+  --neutral-100: 241 243 245;
+  --neutral-200: 233 236 239;
+  --neutral-300: 222 226 230;
+  --neutral-400: 206 212 218;
+  --neutral-500: 173 181 189;
+  --neutral-600: 134 142 150;
+  --neutral-700: 73 80 87;
+  --neutral-800: 52 58 64;
+  --neutral-900: 33 37 41;
+  
+  --background: 0 0% 100%;
+  --foreground: 20 14.3% 4.1%;
+  --card: 0 0% 100%;
+  --card-foreground: 20 14.3% 4.1%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 20 14.3% 4.1%;
+  --muted: 60 4.8% 95.9%;
+  --muted-foreground: 25 5.3% 44.7%;
+  --border: 20 5.9% 90%;
+  --input: 20 5.9% 90%;
+  --ring: 20 14.3% 4.1%;
+  --radius: 0.5rem;
+
+  font-family: 'Inter', sans-serif;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 240 4.9% 83.9%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-poppins;
+  }
+}
+
+.font-poppins {
+  font-family: 'Poppins', sans-serif;
+}
+
+.font-inter {
+  font-family: 'Inter', sans-serif;
+}
