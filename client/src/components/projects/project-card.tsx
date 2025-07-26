@@ -1,8 +1,7 @@
-import { useState } from "react";
 import { Project } from "@shared/schema";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { categoryColor } from "@/lib/utils";
+import { categoryColor, formatCurrency } from "@/lib/utils";
 import { Link } from "wouter";
 
 type ProjectCardProps = {
@@ -32,7 +31,7 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
           </div>
           <div className="flex justify-between">
             <span className="text-neutral-600 text-sm">Estimated cost:</span>
-            <span className="font-medium">${estimatedPrice.toFixed(2)}</span>
+            <span className="font-medium">{formatCurrency(estimatedPrice)}</span>
           </div>
         </div>
         <div className="mt-4 pt-4 border-t border-neutral-200 flex justify-between">

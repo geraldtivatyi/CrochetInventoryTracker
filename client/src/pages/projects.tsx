@@ -51,14 +51,14 @@ export default function Projects() {
       yarnCost = yarns.reduce((sum, yarn) => sum + yarn.costPerBall, 0) / yarns.length;
     } else {
       // Default cost if no yarns in inventory
-      yarnCost = 5.00;
+      yarnCost = 95.00;
     }
 
     // Calculate material cost
     const materialCost = yarnCost * project.ballsNeeded;
 
-    // Calculate labor cost (using default hourly rate of $12)
-    const hourlyRate = 12;
+    // Calculate labor cost (using default hourly rate of R225)
+    const hourlyRate = 225;
     const laborCost = project.timeToMake * hourlyRate;
 
     // Calculate base cost
