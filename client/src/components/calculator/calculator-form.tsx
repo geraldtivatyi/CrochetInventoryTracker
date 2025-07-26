@@ -7,6 +7,7 @@ import { Project, Yarn, PriceCalculation } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
+import { formatCurrency } from "@/lib/utils";
 
 import {
   Form,
@@ -164,7 +165,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="">Create new calculation</SelectItem>
+                    <SelectItem value="0">Create new calculation</SelectItem>
                     {projects.map((project) => (
                       <SelectItem key={project.id} value={project.id.toString()}>
                         {project.name}
@@ -215,10 +216,10 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="0">Select yarn</SelectItem>
+                      <SelectItem value="0">No specific yarn</SelectItem>
                       {yarns.map((yarn) => (
                         <SelectItem key={yarn.id} value={yarn.id.toString()}>
-                          {yarn.type} - {yarn.color} (${yarn.costPerBall.toFixed(2)}/ball)
+                          {yarn.type} - {yarn.color} ({formatCurrency(yarn.costPerBall)}/ball)
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -374,7 +375,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                     />
                   </FormControl>
                   <FormLabel htmlFor="calc-round" className="cursor-pointer">
-                    Round to nearest $5
+                    Round to nearest R5
                   </FormLabel>
                   <FormMessage />
                 </FormItem>

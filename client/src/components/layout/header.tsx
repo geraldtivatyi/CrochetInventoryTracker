@@ -22,12 +22,11 @@ export default function Header() {
             <Link 
               key={item.path} 
               href={item.path}
-            >
-              <a className={`hover:text-primary-600 font-medium transition-colors flex items-center ${
+              className={`hover:text-primary-600 font-medium transition-colors flex items-center ${
                 location === item.path ? "text-primary-600" : "text-neutral-700"
-              }`}>
-                <i className={`${item.icon} mr-1`}></i> {item.label}
-              </a>
+              }`}
+            >
+              <i className={`${item.icon} mr-1`}></i> {item.label}
             </Link>
           ))}
         </nav>

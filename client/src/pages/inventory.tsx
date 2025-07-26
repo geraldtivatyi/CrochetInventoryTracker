@@ -15,7 +15,7 @@ export default function Inventory() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [currentYarn, setCurrentYarn] = useState<Yarn | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState("");
-  const [colorFilter, setColorFilter] = useState("");
+  const [colorFilter, setColorFilter] = useState("all");
   const [sortBy, setSortBy] = useState("name");
 
   // Fetch all yarns
@@ -33,7 +33,7 @@ export default function Inventory() {
     const matchesSearch = yarn.type.toLowerCase().includes(searchTerm) || 
                           yarn.color.toLowerCase().includes(searchTerm);
     
-    const matchesColor = colorFilter === "" || getColorCategory(yarn.colorHex) === colorFilter;
+    const matchesColor = colorFilter === "all" || colorFilter === "" || getColorCategory(yarn.colorHex) === colorFilter;
     
     return matchesSearch && matchesColor;
   }).sort((a, b) => {
@@ -124,7 +124,7 @@ export default function Inventory() {
                   <SelectValue placeholder="All Colors" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Colors</SelectItem>
+                  <SelectItem value="all">All Colors</SelectItem>
                   <SelectItem value="red">Reds</SelectItem>
                   <SelectItem value="blue">Blues</SelectItem>
                   <SelectItem value="green">Greens</SelectItem>

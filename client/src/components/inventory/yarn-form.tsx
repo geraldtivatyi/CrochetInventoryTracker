@@ -219,7 +219,8 @@ export default function YarnForm({ yarn, onClose, onSuccess }: YarnFormProps) {
                   <Textarea 
                     id="yarn-notes" 
                     placeholder="Any additional information..."
-                    {...field} 
+                    {...field}
+                    value={field.value || ""}
                   />
                 </FormControl>
                 <FormMessage />

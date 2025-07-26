@@ -9,14 +9,14 @@ export default function Footer() {
             <p className="text-sm text-neutral-600">© {new Date().getFullYear()} CrochetTrack. All rights reserved.</p>
           </div>
           <div className="flex space-x-4">
-            <Link href="#">
-              <a className="text-neutral-600 hover:text-primary-500 text-sm">Help</a>
+            <Link href="#" className="text-neutral-600 hover:text-primary-500 text-sm">
+              Help
             </Link>
-            <Link href="#">
-              <a className="text-neutral-600 hover:text-primary-500 text-sm">Privacy</a>
+            <Link href="#" className="text-neutral-600 hover:text-primary-500 text-sm">
+              Privacy
             </Link>
-            <Link href="#">
-              <a className="text-neutral-600 hover:text-primary-500 text-sm">Terms</a>
+            <Link href="#" className="text-neutral-600 hover:text-primary-500 text-sm">
+              Terms
             </Link>
           </div>
         </div>

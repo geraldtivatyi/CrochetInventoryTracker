@@ -242,7 +242,8 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
                   <Textarea 
                     id="project-notes" 
                     placeholder="Any additional information..."
-                    {...field} 
+                    {...field}
+                    value={field.value || ""}
                   />
                 </FormControl>
                 <FormMessage />
