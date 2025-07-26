@@ -33,7 +33,7 @@ const calculatorFormSchema = insertPriceCalculationSchema.extend({
   itemName: z.string().min(2, { message: "Name must be at least 2 characters" }),
   ballsUsed: z.number().int().min(1, { message: "Must use at least 1 ball" }),
   laborHours: z.number().min(0.5, { message: "Time must be at least 0.5 hours" }),
-  hourlyRate: z.number().min(1, { message: "Hourly rate must be at least $1" }),
+  hourlyRate: z.number().min(1, { message: "Hourly rate must be at least R1" }),
   markupPercentage: z.number().min(0, { message: "Markup cannot be negative" }).max(300, { message: "Markup cannot exceed 300%" }),
 });
 
@@ -68,7 +68,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
       ballsUsed: 1,
       additionalCosts: 0,
       laborHours: 1,
-      hourlyRate: 12,
+      hourlyRate: 225,
       markupPercentage: 40,
       roundToNearest: false
     },

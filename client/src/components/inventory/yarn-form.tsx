@@ -48,7 +48,7 @@ export default function YarnForm({ yarn, onClose, onSuccess }: YarnFormProps) {
           type: "",
           color: "",
           colorHex: "#B22222", // Default to a red color
-          costPerBall: 0,
+          costPerBall: 95.00,
           quantityInStock: 0,
           notes: "",
         },

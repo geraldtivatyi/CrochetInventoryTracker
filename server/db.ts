@@ -31,13 +31,13 @@ export class DatabaseStorage implements IStorage {
       const existingYarns = await db.select().from(yarns).limit(1);
       
       if (existingYarns.length === 0) {
-        // Insert sample yarns
+        // Insert sample yarns (prices in ZAR)
         await db.insert(yarns).values([
           {
             type: "Merino Wool",
             color: "Crimson Red",
             colorHex: "#B22222",
-            costPerBall: 6.99,
+            costPerBall: 125.99,
             quantityInStock: 12,
             notes: "Premium soft"
           },
@@ -45,7 +45,7 @@ export class DatabaseStorage implements IStorage {
             type: "Cotton Blend",
             color: "Sky Blue",
             colorHex: "#87CEEB",
-            costPerBall: 4.50,
+            costPerBall: 81.50,
             quantityInStock: 2,
             notes: "Lightweight"
           },
@@ -53,7 +53,7 @@ export class DatabaseStorage implements IStorage {
             type: "Alpaca Wool",
             color: "Caramel",
             colorHex: "#C68E17",
-            costPerBall: 8.25,
+            costPerBall: 149.25,
             quantityInStock: 3,
             notes: "Extra soft"
           },
@@ -61,7 +61,7 @@ export class DatabaseStorage implements IStorage {
             type: "Chunky Acrylic",
             color: "Lavender",
             colorHex: "#B57EDC",
-            costPerBall: 5.75,
+            costPerBall: 103.75,
             quantityInStock: 8,
             notes: "Bulky weight"
           }
@@ -185,7 +185,7 @@ export class DatabaseStorage implements IStorage {
 
   async createCalculation(calculation: InsertPriceCalculation): Promise<PriceCalculation> {
     // Calculate the prices
-    let materialCost = calculation.additionalCosts;
+    let materialCost = calculation.additionalCosts || 0;
     
     if (calculation.yarnId) {
       const yarn = await this.getYarn(calculation.yarnId);
@@ -199,7 +199,7 @@ export class DatabaseStorage implements IStorage {
     const markup = baseCost * (calculation.markupPercentage / 100);
     let finalPrice = baseCost + markup;
     
-    // Round to nearest $5 if requested
+    // Round to nearest R5 if requested
     if (calculation.roundToNearest) {
       finalPrice = Math.ceil(finalPrice / 5) * 5;
     }
@@ -213,7 +213,7 @@ export class DatabaseStorage implements IStorage {
       finalPrice
     };
     
-    const result = await db.insert(priceCalculations).values(calculationWithPrices).returning();
+    const result = await db.insert(priceCalculations).values([calculationWithPrices]).returning();
     return result[0];
   }
 
