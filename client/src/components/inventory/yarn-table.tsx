@@ -91,32 +91,35 @@ export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTablePro
                     {yarn.quantityInStock} balls
                   </span>
                 </TableCell>
-                <TableCell className="text-sm font-medium">
-                  <div className="flex space-x-1">
+                <TableCell className="text-sm font-medium min-w-[120px]">
+                  <div className="flex space-x-1 items-center">
                     <Button 
-                      variant="ghost" 
-                      className="h-auto p-1 text-blue-500 hover:text-blue-700"
+                      variant="outline"
+                      size="sm"
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
                       onClick={() => onStockAdjust(yarn)}
                       title="Adjust Stock"
                     >
-                      <i className="ri-add-subtract-line text-lg"></i>
+                      Stock
                     </Button>
                     <Button 
-                      variant="ghost" 
-                      className="h-auto p-1 text-accent-500 hover:text-accent-700"
+                      variant="outline"
+                      size="sm"
+                      className="text-green-600 border-green-200 hover:bg-green-50"
                       onClick={() => onEdit(yarn)}
                       title="Edit Yarn"
                     >
-                      <i className="ri-pencil-line text-lg"></i>
+                      Edit
                     </Button>
                     <Button 
-                      variant="ghost" 
-                      className="h-auto p-1 text-red-500 hover:text-red-700"
+                      variant="outline"
+                      size="sm"
+                      className="text-red-600 border-red-200 hover:bg-red-50"
                       onClick={() => handleDelete(yarn)}
                       disabled={deleting === yarn.id}
                       title="Delete Yarn"
                     >
-                      <i className="ri-delete-bin-line text-lg"></i>
+                      {deleting === yarn.id ? "..." : "Delete"}
                     </Button>
                   </div>
                 </TableCell>
