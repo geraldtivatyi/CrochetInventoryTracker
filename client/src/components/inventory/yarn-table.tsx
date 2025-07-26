@@ -18,9 +18,10 @@ import { formatCurrency } from "@/lib/utils";
 type YarnTableProps = {
   yarns: Yarn[];
   onEdit: (yarn: Yarn) => void;
+  onStockAdjust: (yarn: Yarn) => void;
 };
 
-export default function YarnTable({ yarns, onEdit }: YarnTableProps) {
+export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTableProps) {
   const { toast } = useToast();
   const [deleting, setDeleting] = useState<number | null>(null);
   
@@ -91,11 +92,20 @@ export default function YarnTable({ yarns, onEdit }: YarnTableProps) {
                   </span>
                 </TableCell>
                 <TableCell className="text-sm font-medium">
-                  <div className="flex space-x-3">
+                  <div className="flex space-x-1">
+                    <Button 
+                      variant="ghost" 
+                      className="h-auto p-1 text-blue-500 hover:text-blue-700"
+                      onClick={() => onStockAdjust(yarn)}
+                      title="Adjust Stock"
+                    >
+                      <i className="ri-add-subtract-line text-lg"></i>
+                    </Button>
                     <Button 
                       variant="ghost" 
                       className="h-auto p-1 text-accent-500 hover:text-accent-700"
                       onClick={() => onEdit(yarn)}
+                      title="Edit Yarn"
                     >
                       <i className="ri-pencil-line text-lg"></i>
                     </Button>
@@ -104,6 +114,7 @@ export default function YarnTable({ yarns, onEdit }: YarnTableProps) {
                       className="h-auto p-1 text-red-500 hover:text-red-700"
                       onClick={() => handleDelete(yarn)}
                       disabled={deleting === yarn.id}
+                      title="Delete Yarn"
                     >
                       <i className="ri-delete-bin-line text-lg"></i>
                     </Button>

@@ -166,7 +166,7 @@ export default function YarnForm({ yarn, onClose, onSuccess }: YarnFormProps) {
                   <FormLabel htmlFor="cost-per-ball">Cost Per Ball</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                      <span className="text-neutral-500">$</span>
+                      <span className="text-neutral-500">R</span>
                     </div>
                     <FormControl>
                       <Input 

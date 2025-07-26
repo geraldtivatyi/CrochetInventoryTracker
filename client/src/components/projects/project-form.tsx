@@ -188,7 +188,7 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
                   <FormLabel htmlFor="project-yarn">Preferred Yarn Type</FormLabel>
                   <Select
                     onValueChange={field.onChange}
-                    value={field.value || ""}
+                    value={field.value || "none"}
                   >
                     <FormControl>
                       <SelectTrigger id="project-yarn">
@@ -196,7 +196,7 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">No preference</SelectItem>
+                      <SelectItem value="none">No preference</SelectItem>
                       {yarns.map((yarn) => (
                         <SelectItem key={yarn.id} value={yarn.type}>
                           {yarn.type}

@@ -1,26 +1,37 @@
 import { useState, ChangeEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import YarnTable from "@/components/inventory/yarn-table";
 import YarnForm from "@/components/inventory/yarn-form";
+import StockAdjustmentForm from "@/components/inventory/stock-adjustment-form";
 import { Yarn } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
+import { formatCurrency } from "@/lib/utils";
 
 export default function Inventory() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
   const [currentYarn, setCurrentYarn] = useState<Yarn | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState("");
   const [colorFilter, setColorFilter] = useState("all");
   const [sortBy, setSortBy] = useState("name");
+  const [stockFilter, setStockFilter] = useState("all");
 
   // Fetch all yarns
   const { data: yarns = [], isLoading, error } = useQuery<Yarn[]>({
     queryKey: ['/api/yarns'],
+  });
+
+  // Get low stock yarns
+  const { data: lowStockYarns = [] } = useQuery<Yarn[]>({
+    queryKey: ['/api/yarns/low-stock/5'],
   });
 
   // Handle search input change
@@ -35,7 +46,12 @@ export default function Inventory() {
     
     const matchesColor = colorFilter === "all" || colorFilter === "" || getColorCategory(yarn.colorHex) === colorFilter;
     
-    return matchesSearch && matchesColor;
+    const matchesStock = stockFilter === "all" || 
+                        (stockFilter === "low" && yarn.quantityInStock <= 5) ||
+                        (stockFilter === "out" && yarn.quantityInStock === 0) ||
+                        (stockFilter === "in" && yarn.quantityInStock > 5);
+    
+    return matchesSearch && matchesColor && matchesStock;
   }).sort((a, b) => {
     switch (sortBy) {
       case "name":
@@ -72,11 +88,24 @@ export default function Inventory() {
     setIsEditDialogOpen(true);
   };
 
+  // Handle stock adjustment
+  const handleStockAdjustment = (yarn: Yarn) => {
+    setCurrentYarn(yarn);
+    setIsStockDialogOpen(true);
+  };
+
   // Handle form success (both add and edit)
   const handleFormSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/yarns'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/yarns/low-stock/5'] });
     queryClient.invalidateQueries({ queryKey: ['/api/dashboard'] }); // Refresh dashboard data too
   };
+
+  // Calculate inventory stats
+  const totalValue = yarns.reduce((sum, yarn) => sum + (yarn.costPerBall * yarn.quantityInStock), 0);
+  const totalYarns = yarns.length;
+  const totalBalls = yarns.reduce((sum, yarn) => sum + yarn.quantityInStock, 0);
+  const outOfStock = yarns.filter(yarn => yarn.quantityInStock === 0).length;
 
   if (isLoading) {
     return <div className="p-8 text-center">Loading yarn inventory...</div>;
@@ -95,10 +124,59 @@ export default function Inventory() {
         </Button>
       </div>
 
+      {/* Inventory Statistics */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-600">Total Value</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-green-600">{formatCurrency(totalValue)}</div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-600">Yarn Types</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold">{totalYarns}</div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-600">Total Balls</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold">{totalBalls}</div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-neutral-600">Out of Stock</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="text-2xl font-bold text-red-600">{outOfStock}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Low Stock Alert */}
+      {lowStockYarns.length > 0 && (
+        <Alert className="mb-6 border-orange-200 bg-orange-50">
+          <i className="ri-alert-line text-orange-600"></i>
+          <AlertDescription>
+            <strong>Low Stock Alert:</strong> {lowStockYarns.length} yarn type(s) are running low ({lowStockYarns.length <= 3 ? lowStockYarns.map(y => `${y.type} - ${y.color}`).join(", ") : `${lowStockYarns.slice(0,2).map(y => `${y.type} - ${y.color}`).join(", ")} and ${lowStockYarns.length - 2} others`}).
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Search and Filter */}
       <Card className="bg-white rounded-lg shadow p-4 mb-6">
         <CardContent className="p-0">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <label htmlFor="search-yarn" className="block text-sm font-medium text-neutral-700 mb-1">Search</label>
               <div className="relative">
@@ -136,6 +214,24 @@ export default function Inventory() {
             </div>
             
             <div>
+              <label htmlFor="filter-stock" className="block text-sm font-medium text-neutral-700 mb-1">Stock Level</label>
+              <Select
+                value={stockFilter}
+                onValueChange={setStockFilter}
+              >
+                <SelectTrigger id="filter-stock">
+                  <SelectValue placeholder="All Stock Levels" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Stock Levels</SelectItem>
+                  <SelectItem value="in">In Stock (&gt;5)</SelectItem>
+                  <SelectItem value="low">Low Stock (≤5)</SelectItem>
+                  <SelectItem value="out">Out of Stock</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div>
               <label htmlFor="sort-by" className="block text-sm font-medium text-neutral-700 mb-1">Sort By</label>
               <Select
                 value={sortBy}
@@ -159,7 +255,7 @@ export default function Inventory() {
 
       {/* Inventory Table */}
       <Card className="bg-white rounded-lg shadow overflow-hidden">
-        <YarnTable yarns={filteredYarns} onEdit={handleEditYarn} />
+        <YarnTable yarns={filteredYarns} onEdit={handleEditYarn} onStockAdjust={handleStockAdjustment} />
         
         {/* Pagination (simplified) */}
         <div className="px-4 py-3 bg-neutral-50 border-t border-neutral-200 sm:px-6">
@@ -202,6 +298,22 @@ export default function Inventory() {
             onClose={() => setIsEditDialogOpen(false)} 
             onSuccess={handleFormSuccess} 
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Stock Adjustment Dialog */}
+      <Dialog open={isStockDialogOpen} onOpenChange={setIsStockDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adjust Stock</DialogTitle>
+          </DialogHeader>
+          {currentYarn && (
+            <StockAdjustmentForm
+              yarn={currentYarn}
+              onClose={() => setIsStockDialogOpen(false)}
+              onSuccess={handleFormSuccess}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
