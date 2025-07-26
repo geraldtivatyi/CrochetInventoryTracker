@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import YarnTable from "@/components/inventory/yarn-table";
 import YarnForm from "@/components/inventory/yarn-form";
-import StockAdjustmentForm from "@/components/inventory/stock-adjustment-form";
+// import StockAdjustmentForm from "@/components/inventory/stock-adjustment-form";
 import { Yarn } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
@@ -308,11 +308,13 @@ export default function Inventory() {
             <DialogTitle>Adjust Stock</DialogTitle>
           </DialogHeader>
           {currentYarn && (
-            <StockAdjustmentForm
-              yarn={currentYarn}
-              onClose={() => setIsStockDialogOpen(false)}
-              onSuccess={handleFormSuccess}
-            />
+            <div className="p-5">
+              <p className="mb-4">Stock adjustment feature will be available after fixing module import.</p>
+              <div className="text-sm text-neutral-600 mb-4">
+                Current stock for {currentYarn.type} - {currentYarn.color}: {currentYarn.quantityInStock} balls
+              </div>
+              <Button onClick={() => setIsStockDialogOpen(false)}>Close</Button>
+            </div>
           )}
         </DialogContent>
       </Dialog>
