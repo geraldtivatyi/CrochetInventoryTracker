@@ -283,7 +283,7 @@ export default function Inventory() {
 
       {/* Add Yarn Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add New Yarn</DialogTitle>
           </DialogHeader>
@@ -293,7 +293,7 @@ export default function Inventory() {
 
       {/* Edit Yarn Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Yarn</DialogTitle>
           </DialogHeader>
