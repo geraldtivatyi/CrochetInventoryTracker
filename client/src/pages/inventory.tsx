@@ -119,8 +119,12 @@ export default function Inventory() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h2 className="font-poppins font-semibold text-xl">Yarn Inventory</h2>
-        <Button onClick={() => setIsAddDialogOpen(true)}>
-          <i className="ri-add-line mr-1"></i> Add Yarn
+        <Button 
+          onClick={() => setIsAddDialogOpen(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 font-medium"
+          size="lg"
+        >
+          + Add New Yarn
         </Button>
       </div>
 
