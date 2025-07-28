@@ -77,10 +77,12 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
   
   // If an initial project was provided, load that project's data
   useEffect(() => {
+    console.log("CalculatorForm - initialProject:", initialProject, "projects length:", projects.length);
     if (initialProject && projects.length > 0) {
       const project = projects.find(p => p.id === initialProject);
+      console.log("CalculatorForm - Found project:", project);
       if (project) {
-        form.reset({
+        const formData = {
           ...form.getValues(),
           projectId: project.id,
           itemName: project.name,
@@ -95,7 +97,9 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
             : 0,
           // Ensure the markup stays at 5% for existing projects
           markupPercentage: 5
-        });
+        };
+        console.log("CalculatorForm - Resetting form with:", formData);
+        form.reset(formData);
       }
     }
   }, [initialProject, projects, yarns, form]);

@@ -14,12 +14,16 @@ export default function Calculator() {
   // Parse query parameters to get project ID if any
   useEffect(() => {
     console.log("Calculator page - Full location:", location);
-    const queryString = location.includes('?') ? location.split('?')[1] : '';
+    console.log("Calculator page - window.location.search:", window.location.search);
+    
+    // Use window.location.search directly as wouter might not include query params
+    const queryString = window.location.search.slice(1); // Remove the '?' 
     console.log("Calculator page - Query string:", queryString);
     const params = new URLSearchParams(queryString);
     const projectId = params.get('project');
     console.log("Calculator page - Project ID from URL:", projectId);
     if (projectId) {
+      console.log("Calculator page - Setting selected project ID:", parseInt(projectId));
       setSelectedProjectId(parseInt(projectId));
     }
   }, [location]);
@@ -63,6 +67,11 @@ export default function Calculator() {
               initialProject={selectedProjectId} 
               onCalculate={handleCalculate} 
             />
+            {selectedProjectId && (
+              <div className="mt-2 text-xs text-blue-600">
+                Debug: Loading project ID {selectedProjectId}
+              </div>
+            )}
           </div>
         </div>
         
