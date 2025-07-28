@@ -1,9 +1,11 @@
-import { PriceCalculation } from "@shared/schema";
+import { PriceCalculation, Project } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 type PriceBreakdownProps = {
   calculation: PriceCalculation | null;
@@ -12,6 +14,16 @@ type PriceBreakdownProps = {
 
 export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreakdownProps) {
   const { toast } = useToast();
+  const [updatingProject, setUpdatingProject] = useState(false);
+
+  // Fetch projects to get current project data
+  const { data: projects = [] } = useQuery<Project[]>({
+    queryKey: ['/api/projects'],
+  });
+
+  const currentProject = calculation?.projectId 
+    ? projects.find(p => p.id === calculation.projectId)
+    : null;
   
   const handleSave = () => {
     // In a real app, this would save the calculation to a "saved calculations" list
@@ -19,6 +31,40 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
       title: "Calculation saved",
       description: "The price calculation has been saved to your records",
     });
+  };
+
+  const handleUpdateProject = async () => {
+    if (!calculation || !currentProject) return;
+    
+    setUpdatingProject(true);
+    try {
+      // Update the project with the new calculated values
+      const updatedProject = {
+        ...currentProject,
+        ballsNeeded: calculation.ballsUsed,
+        timeToMake: calculation.laborHours,
+        // Store the calculated price in project notes or a new field
+        notes: `Calculated price: ${formatCurrency(calculation.finalPrice)}${currentProject.notes ? ` | ${currentProject.notes}` : ''}`
+      };
+
+      await apiRequest("PATCH", `/api/projects/${currentProject.id}`, updatedProject);
+      queryClient.invalidateQueries({ queryKey: ['/api/projects'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/dashboard'] });
+      
+      toast({
+        title: "Project updated",
+        description: `${currentProject.name} has been updated with the calculated pricing`,
+      });
+    } catch (error) {
+      console.error("Error updating project:", error);
+      toast({
+        title: "Error",
+        description: "There was a problem updating the project",
+        variant: "destructive",
+      });
+    } finally {
+      setUpdatingProject(false);
+    }
   };
   
   const handlePrint = () => {
@@ -80,6 +126,21 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
         </div>
         
         <div className="mt-6 space-y-3">
+          {currentProject && (
+            <Button
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={handleUpdateProject}
+              disabled={updatingProject}
+            >
+              {updatingProject ? (
+                "Updating..."
+              ) : (
+                <>
+                  <i className="ri-refresh-line mr-1"></i> Update Project Pricing
+                </>
+              )}
+            </Button>
+          )}
           <Button
             variant="accent"
             className="w-full"

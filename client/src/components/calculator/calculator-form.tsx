@@ -70,7 +70,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
       additionalCosts: 0,
       laborHours: 1,
       hourlyRate: 225,
-      markupPercentage: 40,
+      markupPercentage: 5,
       roundToNearest: false
     },
   });

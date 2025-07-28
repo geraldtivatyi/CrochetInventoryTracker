@@ -29,3 +29,12 @@ This app helps crochet businesses track yarn inventory, project templates, calcu
   - Form validation messages updated to reference Rands
   - Database re-seeded with ZAR pricing
 - App deployed and functional with persistent storage
+- **Enhanced Projects page with yarn color integration**:
+  - Project cards now display actual yarn colors with color circles
+  - Project forms show yarn colors in selection dropdown
+  - Added "Add New Yarn" functionality directly from project forms
+  - Smart matching between projects and inventory yarns
+- **Updated Calculator with project integration**:
+  - Default markup changed from 40% to 5% for all calculations
+  - Added "Update Project Pricing" button to save calculations back to projects
+  - Calculator updates project time/materials and stores calculated price in notes

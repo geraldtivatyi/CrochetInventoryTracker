@@ -66,8 +66,8 @@ export default function Projects() {
     // Calculate base cost
     const baseCost = materialCost + laborCost;
 
-    // Apply default markup of 40%
-    const markup = baseCost * 0.4;
+    // Apply default markup of 5%
+    const markup = baseCost * 0.05;
 
     // Final price
     return baseCost + markup;
