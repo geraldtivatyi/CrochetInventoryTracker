@@ -88,8 +88,13 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
           laborHours: project.timeToMake,
           // Find a matching yarn if there's a preferred type
           yarnId: project.preferredYarnType 
-            ? yarns.find(y => y.type === project.preferredYarnType)?.id || 0 
-            : 0
+            ? yarns.find(y => 
+                project.preferredYarnType === `${y.type} - ${y.color}` || 
+                project.preferredYarnType === y.type
+              )?.id || 0 
+            : 0,
+          // Ensure the markup stays at 5% for existing projects
+          markupPercentage: 5
         });
       }
     }
@@ -130,7 +135,10 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
         
         // If the project has a preferred yarn type, try to select it
         if (project.preferredYarnType) {
-          const matchingYarn = yarns.find(y => y.type === project.preferredYarnType);
+          const matchingYarn = yarns.find(y => 
+            project.preferredYarnType === `${y.type} - ${y.color}` || 
+            project.preferredYarnType === y.type
+          );
           if (matchingYarn) {
             form.setValue("yarnId", matchingYarn.id);
           }

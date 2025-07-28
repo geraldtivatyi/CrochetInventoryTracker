@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/utils";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
 type PriceBreakdownProps = {
@@ -14,6 +15,7 @@ type PriceBreakdownProps = {
 
 export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreakdownProps) {
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [updatingProject, setUpdatingProject] = useState(false);
 
   // Fetch projects to get current project data
@@ -55,6 +57,11 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
         title: "Project updated",
         description: `${currentProject.name} has been updated with the calculated pricing`,
       });
+      
+      // Redirect to projects page after 1 second
+      setTimeout(() => {
+        setLocation('/projects');
+      }, 1000);
     } catch (error) {
       console.error("Error updating project:", error);
       toast({
