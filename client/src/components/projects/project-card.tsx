@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Project } from "@shared/schema";
+import { Project, Yarn } from "@shared/schema";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { categoryColor, formatCurrency } from "@/lib/utils";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
@@ -18,6 +19,19 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
   const { toast } = useToast();
   const [deleting, setDeleting] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(false);
+
+  // Fetch yarns to get color information
+  const { data: yarns = [] } = useQuery<Yarn[]>({
+    queryKey: ['/api/yarns'],
+  });
+
+  // Find matching yarn for color display
+  const matchingYarn = project.preferredYarnType 
+    ? yarns.find(y => 
+        project.preferredYarnType === `${y.type} - ${y.color}` || 
+        project.preferredYarnType === y.type
+      )
+    : null;
 
   const handleDeleteClick = () => {
     setDeleteDialog(true);
@@ -58,8 +72,19 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
           </div>
           
           {project.preferredYarnType && (
-            <div className="text-sm text-neutral-600 mb-3">
-              Preferred: {project.preferredYarnType}
+            <div className="text-sm text-neutral-600 mb-3 flex items-center space-x-2">
+              <span>Preferred:</span>
+              {matchingYarn ? (
+                <div className="flex items-center space-x-2">
+                  <div 
+                    className="w-3 h-3 rounded-full border border-neutral-300"
+                    style={{ backgroundColor: matchingYarn.colorHex }}
+                  />
+                  <span className="font-medium">{matchingYarn.type} - {matchingYarn.color}</span>
+                </div>
+              ) : (
+                <span className="font-medium text-amber-600">{project.preferredYarnType} (not in inventory)</span>
+              )}
             </div>
           )}
           

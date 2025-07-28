@@ -4,7 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { insertProjectSchema } from "@shared/schema";
 import { Project, Yarn } from "@shared/schema";
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 
@@ -26,6 +26,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import YarnForm from "@/components/inventory/yarn-form";
 
 // Extend the project schema with additional validation
 const projectFormSchema = insertProjectSchema.extend({
@@ -46,11 +48,22 @@ type ProjectFormProps = {
 export default function ProjectForm({ project, onClose, onSuccess }: ProjectFormProps) {
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAddYarnDialogOpen, setIsAddYarnDialogOpen] = useState(false);
   
   // Fetch all yarns for the yarn type dropdown
   const { data: yarns = [] } = useQuery<Yarn[]>({
     queryKey: ['/api/yarns'],
   });
+
+  // Handle yarn form success
+  const handleYarnFormSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['/api/yarns'] });
+    setIsAddYarnDialogOpen(false);
+    toast({
+      title: "Yarn added",
+      description: "New yarn has been added to inventory and is now available for selection",
+    });
+  };
   
   // Initialize form with existing project data or defaults
   const form = useForm<ProjectFormValues>({
@@ -185,21 +198,38 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
               name="preferredYarnType"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel htmlFor="project-yarn">Preferred Yarn Type</FormLabel>
+                  <div className="flex items-center justify-between">
+                    <FormLabel htmlFor="project-yarn">Preferred Yarn</FormLabel>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsAddYarnDialogOpen(true)}
+                      className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                    >
+                      + Add Yarn
+                    </Button>
+                  </div>
                   <Select
                     onValueChange={field.onChange}
                     value={field.value || "none"}
                   >
                     <FormControl>
                       <SelectTrigger id="project-yarn">
-                        <SelectValue placeholder="Select yarn type" />
+                        <SelectValue placeholder="Select yarn type and color" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
                       <SelectItem value="none">No preference</SelectItem>
                       {yarns.map((yarn) => (
-                        <SelectItem key={yarn.id} value={yarn.type}>
-                          {yarn.type}
+                        <SelectItem key={`${yarn.type}-${yarn.color}`} value={`${yarn.type} - ${yarn.color}`}>
+                          <div className="flex items-center space-x-2">
+                            <div 
+                              className="w-3 h-3 rounded-full border border-neutral-300"
+                              style={{ backgroundColor: yarn.colorHex }}
+                            />
+                            <span>{yarn.type} - {yarn.color}</span>
+                          </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -271,6 +301,19 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
           </div>
         </form>
       </Form>
+
+      {/* Add Yarn Dialog */}
+      <Dialog open={isAddYarnDialogOpen} onOpenChange={setIsAddYarnDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add New Yarn to Inventory</DialogTitle>
+          </DialogHeader>
+          <YarnForm 
+            onClose={() => setIsAddYarnDialogOpen(false)} 
+            onSuccess={handleYarnFormSuccess} 
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
