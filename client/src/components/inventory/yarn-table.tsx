@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/utils";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
 type YarnTableProps = {
   yarns: Yarn[];
@@ -24,27 +25,34 @@ type YarnTableProps = {
 export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTableProps) {
   const { toast } = useToast();
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; yarn?: Yarn }>({ open: false });
   
-  const handleDelete = async (yarn: Yarn) => {
-    if (confirm(`Are you sure you want to delete ${yarn.type} - ${yarn.color}?`)) {
-      setDeleting(yarn.id);
-      try {
-        await apiRequest("DELETE", `/api/yarns/${yarn.id}`);
-        queryClient.invalidateQueries({ queryKey: ['/api/yarns'] });
-        toast({
-          title: "Yarn deleted",
-          description: `${yarn.type} - ${yarn.color} has been removed from inventory`,
-        });
-      } catch (error) {
-        console.error("Error deleting yarn:", error);
-        toast({
-          title: "Error",
-          description: "There was a problem deleting the yarn",
-          variant: "destructive",
-        });
-      } finally {
-        setDeleting(null);
-      }
+  const handleDeleteClick = (yarn: Yarn) => {
+    setDeleteDialog({ open: true, yarn });
+  };
+
+  const handleConfirmDelete = async () => {
+    const yarn = deleteDialog.yarn;
+    if (!yarn) return;
+
+    setDeleting(yarn.id);
+    try {
+      await apiRequest("DELETE", `/api/yarns/${yarn.id}`);
+      queryClient.invalidateQueries({ queryKey: ['/api/yarns'] });
+      toast({
+        title: "Yarn deleted",
+        description: `${yarn.type} - ${yarn.color} has been removed from inventory`,
+      });
+    } catch (error) {
+      console.error("Error deleting yarn:", error);
+      toast({
+        title: "Error",
+        description: "There was a problem deleting the yarn",
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(null);
+      setDeleteDialog({ open: false });
     }
   };
   
@@ -115,7 +123,7 @@ export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTablePro
                       variant="outline"
                       size="sm"
                       className="text-red-600 border-red-200 hover:bg-red-50"
-                      onClick={() => handleDelete(yarn)}
+                      onClick={() => handleDeleteClick(yarn)}
                       disabled={deleting === yarn.id}
                       title="Delete Yarn"
                     >
@@ -128,6 +136,22 @@ export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTablePro
           )}
         </TableBody>
       </Table>
+      
+      <ConfirmationDialog
+        open={deleteDialog.open}
+        onOpenChange={(open) => setDeleteDialog({ open })}
+        title="Delete Yarn"
+        description={
+          deleteDialog.yarn
+            ? `Are you sure you want to delete ${deleteDialog.yarn.type} - ${deleteDialog.yarn.color}? This action cannot be undone.`
+            : ""
+        }
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={handleConfirmDelete}
+        isLoading={deleting === deleteDialog.yarn?.id}
+        variant="destructive"
+      />
     </div>
   );
 }
