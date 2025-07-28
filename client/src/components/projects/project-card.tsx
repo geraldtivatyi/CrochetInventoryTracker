@@ -3,7 +3,7 @@ import { Project, Yarn } from "@shared/schema";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { categoryColor, formatCurrency } from "@/lib/utils";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -19,6 +19,7 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
   const { toast } = useToast();
   const [deleting, setDeleting] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(false);
+  const [, setLocation] = useLocation();
 
   // Fetch yarns to get color information
   const { data: yarns = [] } = useQuery<Yarn[]>({
@@ -124,7 +125,7 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
               className="text-blue-600 border-blue-200 hover:bg-blue-50 flex-1"
               onClick={() => {
                 console.log("Navigate to calculator with project:", project.id);
-                window.location.href = `/calculator?project=${project.id}`;
+                setLocation(`/calculator?project=${project.id}`);
               }}
             >
               Calculate
