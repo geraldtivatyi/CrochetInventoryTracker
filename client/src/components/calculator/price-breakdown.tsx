@@ -127,9 +127,13 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
           <span className="font-medium">{formatCurrency(calculation.markup)}</span>
         </div>
         
-        <div className="flex justify-between items-center py-3 bg-primary-50 rounded-md px-3 mt-2">
-          <span className="text-neutral-800 font-semibold">Recommended Price</span>
-          <span className="text-primary-700 text-xl font-bold">{formatCurrency(calculation.finalPrice)}</span>
+        {/* Prominent Recommended Sale Price */}
+        <div className="mt-6 p-5 bg-gradient-to-r from-green-500 to-green-600 rounded-lg text-white text-center">
+          <p className="text-sm font-medium opacity-90 mb-2">Recommended Sale Price</p>
+          <p className="text-4xl font-bold mb-1">{formatCurrency(calculation.finalPrice)}</p>
+          <p className="text-xs opacity-80">
+            {calculation.roundToNearest ? 'Rounded to nearest R5' : 'Includes materials, labor & markup'}
+          </p>
         </div>
         
         <div className="mt-6 space-y-3">

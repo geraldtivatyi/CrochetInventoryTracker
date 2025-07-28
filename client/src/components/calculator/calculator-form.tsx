@@ -77,10 +77,8 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
   
   // If an initial project was provided, load that project's data
   useEffect(() => {
-    console.log("CalculatorForm - initialProject:", initialProject, "projects length:", projects.length);
     if (initialProject && projects.length > 0) {
       const project = projects.find(p => p.id === initialProject);
-      console.log("CalculatorForm - Found project:", project);
       if (project) {
         const formData = {
           ...form.getValues(),
@@ -98,7 +96,6 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
           // Ensure the markup stays at 5% for existing projects
           markupPercentage: 5
         };
-        console.log("CalculatorForm - Resetting form with:", formData);
         form.reset(formData);
       }
     }
@@ -160,8 +157,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
     }
   };
   
-  console.log("Calculator form rendered with initialProject:", initialProject);
-  console.log("Form state:", form.getValues());
+
   
   return (
     <Form {...form}>
@@ -408,7 +404,6 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
           <Button 
             type="submit" 
             disabled={isSubmitting}
-            onClick={() => console.log("Calculate button clicked, form values:", form.getValues())}
           >
             {isSubmitting ? "Calculating..." : "Calculate Price"}
           </Button>
