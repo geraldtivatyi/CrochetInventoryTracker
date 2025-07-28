@@ -103,8 +103,11 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
   const handleSubmit = async (values: CalculatorFormValues) => {
     setIsSubmitting(true);
     try {
+      console.log("Submitting calculation with values:", values);
       const result = await apiRequest("POST", "/api/calculations", values);
+      console.log("API response status:", result.status);
       const calculation = await result.json();
+      console.log("Calculation result:", calculation);
       onCalculate(calculation);
       toast({
         title: "Price calculated",

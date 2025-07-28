@@ -27,6 +27,7 @@ export default function Calculator() {
 
   // When calculation is complete, find the yarn details if a yarn was selected
   const handleCalculate = (calculation: PriceCalculation) => {
+    console.log("Calculator page received calculation:", calculation);
     setCalculationResult(calculation);
     
     if (calculation.yarnId) {
