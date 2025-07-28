@@ -15,6 +15,8 @@ export default function Calculator() {
   useEffect(() => {
     const params = new URLSearchParams(location.split('?')[1]);
     const projectId = params.get('project');
+    console.log("Calculator page - URL params:", location);
+    console.log("Calculator page - Project ID from URL:", projectId);
     if (projectId) {
       setSelectedProjectId(parseInt(projectId));
     }

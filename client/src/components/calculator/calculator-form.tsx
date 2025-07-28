@@ -156,6 +156,9 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
     }
   };
   
+  console.log("Calculator form rendered with initialProject:", initialProject);
+  console.log("Form state:", form.getValues());
+  
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, (errors) => {
