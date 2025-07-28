@@ -251,16 +251,21 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
             )}
           />
           
-          <div className="flex justify-end space-x-3 pt-4">
+          <div className="flex justify-end space-x-3 pt-6 border-t border-neutral-200 mt-6">
             <Button
               type="button"
               variant="outline"
               onClick={onClose}
               disabled={isSubmitting}
+              className="px-6"
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button 
+              type="submit" 
+              disabled={isSubmitting}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6"
+            >
               {isSubmitting ? "Saving..." : project ? "Update Project" : "Save Project"}
             </Button>
           </div>
