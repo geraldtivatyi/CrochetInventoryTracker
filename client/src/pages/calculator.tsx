@@ -13,9 +13,11 @@ export default function Calculator() {
 
   // Parse query parameters to get project ID if any
   useEffect(() => {
-    const params = new URLSearchParams(location.split('?')[1]);
+    console.log("Calculator page - Full location:", location);
+    const queryString = location.includes('?') ? location.split('?')[1] : '';
+    console.log("Calculator page - Query string:", queryString);
+    const params = new URLSearchParams(queryString);
     const projectId = params.get('project');
-    console.log("Calculator page - URL params:", location);
     console.log("Calculator page - Project ID from URL:", projectId);
     if (projectId) {
       setSelectedProjectId(parseInt(projectId));

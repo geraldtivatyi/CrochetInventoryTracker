@@ -118,15 +118,17 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
             >
               Edit
             </Button>
-            <Link href={`/calculator?project=${project.id}`} className="flex-1">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-blue-600 border-blue-200 hover:bg-blue-50 w-full"
-              >
-                Calculate
-              </Button>
-            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-blue-600 border-blue-200 hover:bg-blue-50 flex-1"
+              onClick={() => {
+                console.log("Navigate to calculator with project:", project.id);
+                window.location.href = `/calculator?project=${project.id}`;
+              }}
+            >
+              Calculate
+            </Button>
             <Button
               variant="outline"
               size="sm"

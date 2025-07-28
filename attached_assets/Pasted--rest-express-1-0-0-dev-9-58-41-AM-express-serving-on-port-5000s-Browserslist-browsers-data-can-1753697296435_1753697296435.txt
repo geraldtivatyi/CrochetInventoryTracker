@@ -1,0 +1,38 @@
+> rest-express@1.0.0 dev
+9:58:41 AM [express] serving on port 5000s
+Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[vite:css] @import must precede all other statements (besides @charset or empty @layer)
+3  |  @tailwind utilities;
+4  |  
+5  |  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap');
+   |  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+6  |  @import url('https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css');
+7  |  
+[vite:css] @import must precede all other statements (besides @charset or empty @layer)
+4  |  
+5  |  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap');
+6  |  @import url('https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css');
+   |  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+7  |  
+8  |  :root {
+[vite:css] @import must precede all other statements (besides @charset or empty @layer)
+3  |  @tailwind utilities;
+4  |  
+5  |  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap');
+   |  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+6  |  @import url('https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css');
+7  |  
+[vite:css] @import must precede all other statements (besides @charset or empty @layer)
+4  |  
+5  |  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@300;400;500&display=swap');
+6  |  @import url('https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css');
+   |  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+7  |  
+8  |  :root {
+9:58:44 AM [express] GET /api/projects 200 in 115ms :: [{"id":5,"name":"Baby Blanket","category":"Ho…
+9:58:48 AM [express] GET /api/projects 304 in 75ms :: [{"id":5,"name":"Baby Blanket","category":"Hom…
+9:58:48 AM [express] GET /api/yarns 304 in 75ms :: [{"id":5,"type":"Merino Wool","color":"Crimson Re…
+10:07:05 AM [express] GET /api/projects 304 in 649ms :: [{"id":5,"name":"Baby Blanket","category":"Ho…
+10:07:06 AM [express] GET /api/yarns 304 in 1436ms :: [{"id":5,"type":"Merino Wool","color":"Crimson …
