@@ -158,7 +158,9 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
   
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">
+      <form onSubmit={form.handleSubmit(handleSubmit, (errors) => {
+        console.log("Form validation errors:", errors);
+      })} className="space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField
             control={form.control}
@@ -396,7 +398,11 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
         </div>
         
         <div className="flex justify-end">
-          <Button type="submit" disabled={isSubmitting}>
+          <Button 
+            type="submit" 
+            disabled={isSubmitting}
+            onClick={() => console.log("Calculate button clicked, form values:", form.getValues())}
+          >
             {isSubmitting ? "Calculating..." : "Calculate Price"}
           </Button>
         </div>
