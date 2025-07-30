@@ -401,10 +401,11 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
           </div>
         </div>
         
-        <div className="flex justify-end">
+        <div className="flex justify-end mt-6 pt-4 border-t border-gray-200">
           <Button 
             type="submit" 
             disabled={isSubmitting}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium"
           >
             {isSubmitting ? "Calculating..." : "Calculate Price"}
           </Button>
