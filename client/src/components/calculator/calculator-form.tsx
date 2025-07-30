@@ -163,6 +163,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit, (errors) => {
         console.log("Form validation errors:", errors);
+        console.log("Form state on submit:", form.getValues());
       })} className="space-y-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField
