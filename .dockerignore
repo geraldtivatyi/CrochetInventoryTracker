@@ -1,0 +1,12 @@
+node_modules
+.git
+.cache
+dist
+build
+.env
+*.log
+coverage
+/.vscode
+/.idea
+client/node_modules
+client/dist

@@ -267,6 +267,22 @@ export class MemStorage implements IStorage {
   }
 }
 
-import { DatabaseStorage } from "./db";
+// Initialize storage based on presence of a database URL.
+const databaseUrl = process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL;
 
-export const storage = new DatabaseStorage();
+let storageInstance: IStorage;
+
+if (databaseUrl) {
+  try {
+    const { DatabaseStorage } = await import("./db");
+    storageInstance = new DatabaseStorage();
+  } catch (err) {
+    console.error("Failed to initialize DatabaseStorage, falling back to in-memory storage:", err);
+    storageInstance = new MemStorage();
+  }
+} else {
+  console.log("No database URL found; using in-memory storage.");
+  storageInstance = new MemStorage();
+}
+
+export const storage = storageInstance;

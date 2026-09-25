@@ -296,47 +296,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Get dashboard summary data
   router.get("/dashboard", async (req, res) => {
-    const yarns = await storage.getAllYarns();
-    const projects = await storage.getAllProjects();
-    const calculations = await storage.getAllCalculations();
-    const recentActivities = await storage.getRecentActivity(5);
-    const lowStockYarns = await storage.getLowStockYarns(5);
-    
-    // Calculate statistics
-    const totalYarns = yarns.length;
-    const totalProjects = projects.length;
-    
-    let averagePrice = 0;
-    if (calculations.length > 0) {
-      const sum = calculations.reduce((acc, calc) => acc + calc.finalPrice, 0);
-      averagePrice = parseFloat((sum / calculations.length).toFixed(2));
+    try {
+      const yarns = await storage.getAllYarns();
+      const projects = await storage.getAllProjects();
+      const calculations = await storage.getAllCalculations();
+      const recentActivities = await storage.getRecentActivity(5);
+      const lowStockYarns = await storage.getLowStockYarns(5);
+      
+      // Calculate statistics
+      const totalYarns = yarns.length;
+      const totalProjects = projects.length;
+      
+      let averagePrice = 0;
+      if (calculations.length > 0) {
+        const sum = calculations.reduce((acc, calc) => acc + calc.finalPrice, 0);
+        averagePrice = parseFloat((sum / calculations.length).toFixed(2));
+      }
+      
+      const newItems = yarns.filter(yarn => {
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+        // Assuming each yarn has a timestamp when it was added, which we don't track
+        // Here we're just returning a count placeholder
+        return true;
+      }).length;
+      
+      // If we had a profitability calculation, we'd determine the most profitable project
+      const mostProfitableProject = projects.length > 0 ? projects[0].name : 'None';
+      
+      // Recommended markup calculation
+      // In a real app, we'd calculate this based on various factors
+      const recommendedMarkup = 45;
+      
+      res.json({
+        totalYarns,
+        totalProjects,
+        averagePrice,
+        newItems,
+        mostProfitableProject,
+        recommendedMarkup,
+        recentActivities,
+        lowStockYarns
+      });
+    } catch (error) {
+      console.error("Failed to load dashboard data:", error);
+      res.status(500).json({ message: "Failed to load dashboard data" });
     }
-    
-    const newItems = yarns.filter(yarn => {
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-      // Assuming each yarn has a timestamp when it was added, which we don't track
-      // Here we're just returning a count placeholder
-      return true;
-    }).length;
-    
-    // If we had a profitability calculation, we'd determine the most profitable project
-    const mostProfitableProject = projects.length > 0 ? projects[0].name : 'None';
-    
-    // Recommended markup calculation
-    // In a real app, we'd calculate this based on various factors
-    const recommendedMarkup = 45;
-    
-    res.json({
-      totalYarns,
-      totalProjects,
-      averagePrice,
-      newItems,
-      mostProfitableProject,
-      recommendedMarkup,
-      recentActivities,
-      lowStockYarns
-    });
   });
 
   // Register the router

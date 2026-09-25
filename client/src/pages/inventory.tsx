@@ -132,7 +132,7 @@ export default function Inventory() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-neutral-600">Total Value</CardTitle>
+            <CardTitle className="text-sm font-medium text-neutral-600">Total Yarn Value</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-2xl font-bold text-green-600">{formatCurrency(totalValue)}</div>

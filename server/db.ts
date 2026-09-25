@@ -1,4 +1,4 @@
-import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
 import {
   Yarn,
@@ -17,8 +17,26 @@ import {
 import { eq, lte, desc } from "drizzle-orm";
 import { IStorage } from "./storage";
 
-const sql = neon(process.env.DATABASE_URL!);
-const db = drizzle(sql);
+const databaseUrl = process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  throw new Error("A database connection string is required.");
+}
+
+// Support both Neon (neon-http) and a local Postgres connection using node-postgres.
+let db: any;
+
+if (databaseUrl.startsWith("postgres://") || databaseUrl.startsWith("postgresql://")) {
+  // Use node-postgres + drizzle node-postgres adapter for local Postgres
+  const { Pool } = await import("pg");
+  const { drizzle: drizzlePg } = await import("drizzle-orm/node-postgres");
+  const pool = new Pool({ connectionString: databaseUrl });
+  db = drizzlePg(pool);
+} else {
+  // Assume Neon HTTP connection string
+  const sql = neon(databaseUrl);
+  db = drizzleNeon(sql);
+}
 
 export class DatabaseStorage implements IStorage {
   constructor() {

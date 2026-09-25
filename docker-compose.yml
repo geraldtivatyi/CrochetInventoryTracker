@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: crochet_inventory
+    volumes:
+      # For Postgres 18+, mount at /var/lib/postgresql so versioned subdirs work
+      - db_data_v18:/var/lib/postgresql
+      - ./drizzle/0000_initial.sql:/docker-entrypoint-initdb.d/0000_initial.sql:ro
+
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@db:5432/crochet_inventory"
+      DB_HOST: db
+      DB_PORT: 5432
+      PORT: 5173
+      NODE_ENV: production
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+
+volumes:
+  db_data_v18:
