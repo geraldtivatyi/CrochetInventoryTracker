@@ -12,6 +12,7 @@ import Dashboard from "@/pages/dashboard";
 import Inventory from "@/pages/inventory";
 import Projects from "@/pages/projects";
 import Calculator from "@/pages/calculator";
+import Shop from "@/pages/shop";
 import NotFound from "@/pages/not-found";
 
 // Create a layout component that includes the header and footer
@@ -38,6 +39,8 @@ function Router() {
         <Route path="/inventory" component={Inventory} />
         <Route path="/projects" component={Projects} />
         <Route path="/calculator" component={Calculator} />
+        <Route path="/shop" component={Shop} />
+
         <Route component={NotFound} />
       </Switch>
     </Layout>

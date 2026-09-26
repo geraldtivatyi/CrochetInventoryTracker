@@ -13,6 +13,7 @@ import YarnForm from "@/components/inventory/yarn-form";
 import { Yarn } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
+import StockAdjustmentForm from "@/components/inventory/stock-adjustment-form";
 
 export default function Inventory() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -313,10 +314,9 @@ export default function Inventory() {
           </DialogHeader>
           {currentYarn && (
             <div className="p-5">
-              <p className="mb-4">Stock adjustment feature will be available after fixing module import.</p>
-              <div className="text-sm text-neutral-600 mb-4">
-                Current stock for {currentYarn.type} - {currentYarn.color}: {currentYarn.quantityInStock} balls
-              </div>
+              <StockAdjustmentForm yarn={currentYarn} onClose={() => setIsStockDialogOpen(false)} onSuccess={handleFormSuccess} />
+              <p className="mt-4 text-sm text-neutral-500">Note: Stock adjustment functionality is under development.</p>
+              
               <Button onClick={() => setIsStockDialogOpen(false)}>Close</Button>
             </div>
           )}

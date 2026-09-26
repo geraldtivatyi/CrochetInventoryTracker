@@ -8,6 +8,11 @@ export default function Header() {
     { path: "/inventory", label: "Inventory", icon: "ri-archive-line" },
     { path: "/projects", label: "Projects", icon: "ri-scissors-line" },
     { path: "/calculator", label: "Calculator", icon: "ri-calculator-line" },
+    { path: "/shop", label: "Shop", icon: "ri-store-line" },
+    { path: "/about", label: "About", icon: "ri-information-line" },
+    { path: "contact", label: "Contact", icon: "ri-mail-line" },
+    { path: "/settings", label: "Settings", icon: "ri-settings-3-line" },
+    { path: "/profile", label: "Profile", icon: "ri-user-line" },
   ];
   
   return (
