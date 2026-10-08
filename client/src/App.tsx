@@ -14,6 +14,13 @@ import Projects from "@/pages/projects";
 import Calculator from "@/pages/calculator";
 import Shop from "@/pages/shop";
 import NotFound from "@/pages/not-found";
+import Settings from "@/pages/settings";
+import Login from "@/pages/login";
+import ForgotPassword from "@/pages/forgot-password";
+import ResetPassword from "@/pages/reset-password";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { useQuery } from "@tanstack/react-query";
+import Storefront from "@/pages/storefront";
 
 // Create a layout component that includes the header and footer
 const Layout = ({ children }: { children: React.ReactNode }) => {
@@ -29,8 +36,28 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 };
 
 function Router() {
-  // Get current location for active tab highlighting
+  const { user, isLoading } = useAuth();
   const [location] = useLocation();
+  const isShopPath = location.startsWith("/store/");
+  const isLocalHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+  const { data: domainShop } = useQuery<{ shop: { slug: string } | null }>({
+    queryKey: ["/api/storefront/domain"],
+    enabled: location === "/" && !isLocalHost,
+  });
+
+  if (isLoading) return null;
+
+  if (isShopPath) {
+    const slug = decodeURIComponent(location.slice("/store/".length).split("/")[0]);
+    return <Storefront slug={slug} />;
+  }
+  if (location === "/" && domainShop?.shop) return <Storefront customDomain />;
+
+  if (!user) {
+    if (location === "/forgot-password") return <ForgotPassword />;
+    if (location === "/reset-password") return <ResetPassword />;
+    return <Login />;
+  }
 
   return (
     <Layout>
@@ -40,6 +67,7 @@ function Router() {
         <Route path="/projects" component={Projects} />
         <Route path="/calculator" component={Calculator} />
         <Route path="/shop" component={Shop} />
+        <Route path="/settings" component={Settings} />
 
         <Route component={NotFound} />
       </Switch>
@@ -52,7 +80,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
-        <Router />
+        <AuthProvider>
+          <Router />
+        </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

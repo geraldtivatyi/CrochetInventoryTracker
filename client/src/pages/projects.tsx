@@ -5,9 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ProjectCard from "@/components/projects/project-card";
 import ProjectForm from "@/components/projects/project-form";
-import { Project, Yarn } from "@shared/schema";
+import { Project } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
-import { formatCurrency } from "@/lib/utils";
 
 export default function Projects() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -17,11 +16,6 @@ export default function Projects() {
   // Fetch projects
   const { data: projects = [], isLoading: projectsLoading, error: projectsError } = useQuery<Project[]>({
     queryKey: ['/api/projects'],
-  });
-
-  // Fetch yarns to calculate estimated prices
-  const { data: yarns = [], isLoading: yarnsLoading, error: yarnsError } = useQuery<Yarn[]>({
-    queryKey: ['/api/yarns'],
   });
 
   // Handle edit button click
@@ -36,56 +30,17 @@ export default function Projects() {
     queryClient.invalidateQueries({ queryKey: ['/api/dashboard'] }); // Refresh dashboard data too
   };
 
-  // Calculate estimated price for a project
-  const calculateEstimatedPrice = (project: Project): number => {
-    // Find matching yarn by preferred type or use average cost
-    let yarnCost = 0;
-    if (project.preferredYarnType && yarns.length > 0) {
-      const matchingYarn = yarns.find(y => y.type === project.preferredYarnType);
-      if (matchingYarn) {
-        yarnCost = matchingYarn.costPerBall;
-      } else {
-        // Use average yarn cost if preferred type not found
-        yarnCost = yarns.reduce((sum, yarn) => sum + yarn.costPerBall, 0) / yarns.length;
-      }
-    } else if (yarns.length > 0) {
-      // Use average yarn cost if no preferred type
-      yarnCost = yarns.reduce((sum, yarn) => sum + yarn.costPerBall, 0) / yarns.length;
-    } else {
-      // Default cost if no yarns in inventory
-      yarnCost = 95.00;
-    }
-
-    // Calculate material cost
-    const materialCost = yarnCost * project.ballsNeeded;
-
-    // Calculate labor cost (using default hourly rate of R225)
-    const hourlyRate = 225;
-    const laborCost = project.timeToMake * hourlyRate;
-
-    // Calculate base cost
-    const baseCost = materialCost + laborCost;
-
-    // Apply default markup of 5%
-    const markup = baseCost * 0.05;
-
-    // Final price
-    return baseCost + markup;
-  };
-
-  if (projectsLoading || yarnsLoading) {
+  if (projectsLoading) {
     return <div className="p-8 text-center">Loading projects...</div>;
   }
 
-  if (projectsError || yarnsError) {
+  if (projectsError) {
     return <div className="p-8 text-center text-red-500">Error loading projects. Please try again later.</div>;
   }
 
-  // Calculate project statistics
   const totalProjects = projects.length;
   const avgTimeToMake = projects.length > 0 ? projects.reduce((sum, p) => sum + p.timeToMake, 0) / projects.length : 0;
-  const avgEstimatedPrice = projects.length > 0 ? projects.reduce((sum, p) => sum + calculateEstimatedPrice(p), 0) / projects.length : 0;
-  const totalEstimatedValue = projects.reduce((sum, p) => sum + calculateEstimatedPrice(p), 0);
+  const totalBallsRequired = projects.reduce((sum, project) => sum + project.ballsNeeded, 0);
 
   return (
     <div>
@@ -102,7 +57,7 @@ export default function Projects() {
 
       {/* Project Statistics */}
       {projects.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-neutral-600">Total Projects</CardTitle>
@@ -123,19 +78,10 @@ export default function Projects() {
           
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-neutral-600">Avg. Price</CardTitle>
+              <CardTitle className="text-sm font-medium text-neutral-600">Yarn Required</CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
-              <div className="text-2xl font-bold text-green-600">{formatCurrency(avgEstimatedPrice)}</div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-neutral-600">Total Value</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="text-2xl font-bold text-green-600">{formatCurrency(totalEstimatedValue)}</div>
+              <div className="text-2xl font-bold">{totalBallsRequired} balls</div>
             </CardContent>
           </Card>
         </div>
@@ -155,7 +101,6 @@ export default function Projects() {
             <ProjectCard
               key={project.id}
               project={project}
-              estimatedPrice={calculateEstimatedPrice(project)}
               onEdit={handleEditProject}
             />
           ))

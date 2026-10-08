@@ -51,7 +51,7 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
   const [isAddYarnDialogOpen, setIsAddYarnDialogOpen] = useState(false);
   
   // Fetch all yarns for the yarn type dropdown
-  const { data: yarns = [] } = useQuery<Yarn[]>({
+  const { data: yarns = [], isError: yarnsError } = useQuery<Yarn[]>({
     queryKey: ['/api/yarns'],
   });
 
@@ -73,9 +73,9 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
       : {
           name: "",
           category: "",
-          ballsNeeded: 1,
+          ballsNeeded: 0,
           preferredYarnType: "",
-          timeToMake: 1,
+          timeToMake: 0,
           notes: "",
         },
   });
@@ -124,6 +124,11 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
     <div className="p-5">
       <Form {...form}>
         <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+          {yarnsError && (
+            <p role="alert" className="text-sm text-red-600">
+              Could not load your saved yarn inventory. Project details can still be saved, but preferred yarn selection is unavailable.
+            </p>
+          )}
           <FormField
             control={form.control}
             name="name"
@@ -185,7 +190,7 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
                       step="1"
                       placeholder="Number of balls"
                       {...field}
-                      onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                      onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
                     />
                   </FormControl>
                   <FormMessage />
@@ -254,7 +259,7 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
                     step="0.5"
                     placeholder="Estimated hours"
                     {...field}
-                    onChange={(e) => field.onChange(parseFloat(e.target.value) || 0.5)}
+                    onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                   />
                 </FormControl>
                 <FormMessage />

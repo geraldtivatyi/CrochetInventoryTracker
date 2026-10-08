@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Project, Yarn } from "@shared/schema";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { categoryColor, formatCurrency } from "@/lib/utils";
+import { categoryColor } from "@/lib/utils";
 import { Link, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
@@ -11,18 +11,17 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
 type ProjectCardProps = {
   project: Project;
-  estimatedPrice: number;
   onEdit: (project: Project) => void;
 };
 
-export default function ProjectCard({ project, estimatedPrice, onEdit }: ProjectCardProps) {
+export default function ProjectCard({ project, onEdit }: ProjectCardProps) {
   const { toast } = useToast();
   const [deleting, setDeleting] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState(false);
   const [, setLocation] = useLocation();
 
   // Fetch yarns to get color information
-  const { data: yarns = [] } = useQuery<Yarn[]>({
+  const { data: yarns = [], isLoading: yarnsLoading, isError: yarnsError } = useQuery<Yarn[]>({
     queryKey: ['/api/yarns'],
   });
 
@@ -83,6 +82,10 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
                   />
                   <span className="font-medium">{matchingYarn.type} - {matchingYarn.color}</span>
                 </div>
+              ) : yarnsLoading ? (
+                <span className="font-medium text-neutral-500">Loading inventory…</span>
+              ) : yarnsError ? (
+                <span className="font-medium text-red-600">Inventory unavailable</span>
               ) : (
                 <span className="font-medium text-amber-600">{project.preferredYarnType} (not in inventory)</span>
               )}
@@ -97,10 +100,6 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
             <div className="flex justify-between">
               <span className="text-neutral-600 text-sm">Time to make:</span>
               <span className="text-sm font-medium">{project.timeToMake} hours</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-neutral-600 text-sm">Estimated price:</span>
-              <span className="font-semibold text-green-600 text-base">{formatCurrency(estimatedPrice)}</span>
             </div>
           </div>
           
@@ -124,7 +123,6 @@ export default function ProjectCard({ project, estimatedPrice, onEdit }: Project
               size="sm"
               className="text-blue-600 border-blue-200 hover:bg-blue-50 flex-1"
               onClick={() => {
-                console.log("Navigate to calculator with project:", project.id);
                 setLocation(`/calculator?project=${project.id}`);
               }}
             >

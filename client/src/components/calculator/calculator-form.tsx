@@ -6,7 +6,7 @@ import { insertPriceCalculationSchema } from "@shared/schema";
 import { Project, Yarn, PriceCalculation } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/utils";
 
 import {
@@ -47,15 +47,16 @@ type CalculatorFormProps = {
 
 export default function CalculatorForm({ initialProject, onCalculate }: CalculatorFormProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Fetch projects for the dropdown
-  const { data: projects = [] } = useQuery<Project[]>({
+  const { data: projects = [], isLoading: projectsLoading, isError: projectsError } = useQuery<Project[]>({
     queryKey: ['/api/projects'],
   });
   
   // Fetch yarns for the dropdown
-  const { data: yarns = [] } = useQuery<Yarn[]>({
+  const { data: yarns = [], isLoading: yarnsLoading, isError: yarnsError } = useQuery<Yarn[]>({
     queryKey: ['/api/yarns'],
   });
   
@@ -69,8 +70,8 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
       ballsUsed: 1,
       additionalCosts: 0,
       laborHours: 1,
-      hourlyRate: 225,
-      markupPercentage: 5,
+      hourlyRate: 0,
+      markupPercentage: 0,
       roundToNearest: false
     },
   });
@@ -93,8 +94,6 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                 project.preferredYarnType === y.type
               )?.id || 0 
             : 0,
-          // Ensure the markup stays at 5% for existing projects
-          markupPercentage: 5
         };
         form.reset(formData);
       }
@@ -104,15 +103,18 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
   const handleSubmit = async (values: CalculatorFormValues) => {
     setIsSubmitting(true);
     try {
-      console.log("Submitting calculation with values:", values);
-      const result = await apiRequest("POST", "/api/calculations", values);
-      console.log("API response status:", result.status);
+      const result = await apiRequest("POST", "/api/calculations", {
+        ...values,
+        projectId: values.projectId || null,
+        yarnId: values.yarnId || null,
+      });
       const calculation = await result.json();
-      console.log("Calculation result:", calculation);
       onCalculate(calculation);
+      queryClient.invalidateQueries({ queryKey: ["/api/calculations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       toast({
-        title: "Price calculated",
-        description: `The price for ${values.itemName} has been calculated`,
+        title: "Calculation saved",
+        description: `The price for ${values.itemName} was calculated and saved to your records.`,
       });
     } catch (error) {
       console.error("Error calculating price:", error);
@@ -161,10 +163,16 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
   
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleSubmit, (errors) => {
-        console.log("Form validation errors:", errors);
-        console.log("Form state on submit:", form.getValues());
-      })} className="space-y-5">
+      <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">
+        {(projectsLoading || yarnsLoading) && (
+          <p className="text-sm text-neutral-500">Loading saved projects and yarn inventory…</p>
+        )}
+        {(projectsError || yarnsError) && (
+          <p role="alert" className="text-sm text-red-600">
+            Could not load saved {projectsError && yarnsError ? "projects or yarn inventory" : projectsError ? "projects" : "yarn inventory"}.
+            Retry after reconnecting; no inventory cost will be assumed.
+          </p>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField
             control={form.control}
@@ -261,7 +269,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                         step="1"
                         placeholder="Number of balls"
                         {...field}
-                        onChange={(e) => field.onChange(parseInt(e.target.value) || 1)}
+                        onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
                       />
                     </FormControl>
                     <FormMessage />
@@ -277,7 +285,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                     <FormLabel htmlFor="calc-additional">Additional Materials Cost</FormLabel>
                     <div className="relative">
                       <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                        <span className="text-neutral-500">$</span>
+                        <span className="text-neutral-500">R</span>
                       </div>
                       <FormControl>
                         <Input 
@@ -317,7 +325,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                       step="0.5"
                       placeholder="Hours"
                       {...field}
-                      onChange={(e) => field.onChange(parseFloat(e.target.value) || 0.5)}
+                      onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                     />
                   </FormControl>
                   <FormMessage />
@@ -333,7 +341,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                   <FormLabel htmlFor="calc-rate">Hourly Rate</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                      <span className="text-neutral-500">$</span>
+                      <span className="text-neutral-500">R</span>
                     </div>
                     <FormControl>
                       <Input 
@@ -344,7 +352,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
                         min="1"
                         placeholder="0.00"
                         {...field}
-                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 1)}
+                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
                       />
                     </FormControl>
                   </div>
@@ -363,7 +371,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
               name="markupPercentage"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel htmlFor="calc-markup">Markup Percentage (%)</FormLabel>
+                  <FormLabel htmlFor="calc-markup">Your Markup Percentage (%)</FormLabel>
                   <FormControl>
                     <Input 
                       id="calc-markup" 
@@ -404,7 +412,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
         <div className="flex justify-end mt-6 pt-4 border-t border-gray-200">
           <Button 
             type="submit" 
-            disabled={isSubmitting}
+            disabled={isSubmitting || projectsLoading || yarnsLoading || projectsError || yarnsError}
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium"
           >
             {isSubmitting ? "Calculating..." : "Calculate Price"}

@@ -6,7 +6,7 @@ export default function Footer() {
       <div className="container mx-auto px-4">
         <div className="flex flex-col sm:flex-row justify-between items-center">
           <div className="mb-4 sm:mb-0">
-            <p className="text-sm text-neutral-600">© {new Date().getFullYear()} CrochetTrack. All rights reserved.</p>
+            <p className="text-sm text-neutral-600">© {new Date().getFullYear()} CrochetNook. All rights reserved.</p>
           </div>
           <div className="flex space-x-4">
             <Link href="#" className="text-neutral-600 hover:text-primary-500 text-sm">

@@ -5,11 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import YarnTable from "@/components/inventory/yarn-table";
 import YarnForm from "@/components/inventory/yarn-form";
-// import StockAdjustmentForm from "@/components/inventory/stock-adjustment-form";
 import { Yarn } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
@@ -30,10 +28,7 @@ export default function Inventory() {
     queryKey: ['/api/yarns'],
   });
 
-  // Get low stock yarns
-  const { data: lowStockYarns = [] } = useQuery<Yarn[]>({
-    queryKey: ['/api/yarns/low-stock/5'],
-  });
+  const lowStockYarns = yarns.filter((yarn) => yarn.quantityInStock <= 5);
 
   // Handle search input change
   const handleSearch = (e: ChangeEvent<HTMLInputElement>) => {
@@ -45,7 +40,7 @@ export default function Inventory() {
     const matchesSearch = yarn.type.toLowerCase().includes(searchTerm) || 
                           yarn.color.toLowerCase().includes(searchTerm);
     
-    const matchesColor = colorFilter === "all" || colorFilter === "" || getColorCategory(yarn.colorHex) === colorFilter;
+    const matchesColor = colorFilter === "all" || colorFilter === "" || yarn.color === colorFilter;
     
     const matchesStock = stockFilter === "all" || 
                         (stockFilter === "low" && yarn.quantityInStock <= 5) ||
@@ -70,19 +65,6 @@ export default function Inventory() {
     }
   });
 
-  // Function to categorize color by hex code
-  function getColorCategory(hex: string): string {
-    // Simple color categorization based on hex value
-    hex = hex.toLowerCase();
-    if (hex.startsWith("#f") || hex.startsWith("#e") || hex.startsWith("#d")) return "light";
-    if (hex.includes("ff0000") || hex.includes("f00") || hex.includes("cc") || hex.includes("aa0000")) return "red";
-    if (hex.includes("0000ff") || hex.includes("00f") || hex.includes("0000cc") || hex.includes("0000aa")) return "blue";
-    if (hex.includes("00ff00") || hex.includes("0f0") || hex.includes("00cc00") || hex.includes("00aa00")) return "green";
-    if (hex.includes("ffff00") || hex.includes("ff0") || hex.includes("cccc00") || hex.includes("aaaa00")) return "yellow";
-    if (hex.includes("000") || hex.includes("111") || hex.includes("222") || hex.includes("333")) return "neutral";
-    return "other";
-  }
-
   // Handle edit button click
   const handleEditYarn = (yarn: Yarn) => {
     setCurrentYarn(yarn);
@@ -98,7 +80,6 @@ export default function Inventory() {
   // Handle form success (both add and edit)
   const handleFormSuccess = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/yarns'] });
-    queryClient.invalidateQueries({ queryKey: ['/api/yarns/low-stock/5'] });
     queryClient.invalidateQueries({ queryKey: ['/api/dashboard'] }); // Refresh dashboard data too
   };
 
@@ -133,7 +114,7 @@ export default function Inventory() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-neutral-600">Total Yarn Value</CardTitle>
+            <CardTitle className="text-sm font-medium text-neutral-600">Inventory Cost Value</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-2xl font-bold text-green-600">{formatCurrency(totalValue)}</div>
@@ -208,12 +189,9 @@ export default function Inventory() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Colors</SelectItem>
-                  <SelectItem value="red">Reds</SelectItem>
-                  <SelectItem value="blue">Blues</SelectItem>
-                  <SelectItem value="green">Greens</SelectItem>
-                  <SelectItem value="yellow">Yellows</SelectItem>
-                  <SelectItem value="neutral">Neutrals</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
+                  {Array.from(new Set(yarns.map((yarn) => yarn.color))).sort().map((color) => (
+                    <SelectItem key={color} value={color}>{color}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -262,22 +240,11 @@ export default function Inventory() {
       <Card className="bg-white rounded-lg shadow overflow-hidden">
         <YarnTable yarns={filteredYarns} onEdit={handleEditYarn} onStockAdjust={handleStockAdjustment} />
         
-        {/* Pagination (simplified) */}
         <div className="px-4 py-3 bg-neutral-50 border-t border-neutral-200 sm:px-6">
           <nav className="flex items-center justify-between">
-            <div className="hidden sm:block">
-              <p className="text-sm text-neutral-700">
-                Showing <span className="font-medium">1</span> to <span className="font-medium">{filteredYarns.length}</span> of <span className="font-medium">{yarns.length}</span> entries
-              </p>
-            </div>
-            <div className="flex-1 flex justify-center sm:justify-end">
-              <Button variant="outline" className="relative inline-flex items-center px-4 py-2" disabled>
-                Previous
-              </Button>
-              <Button variant="outline" className="ml-3 relative inline-flex items-center px-4 py-2" disabled>
-                Next
-              </Button>
-            </div>
+            <p className="text-sm text-neutral-700">
+              Showing {filteredYarns.length} of {yarns.length} yarn varieties
+            </p>
           </nav>
         </div>
       </Card>
@@ -315,9 +282,6 @@ export default function Inventory() {
           {currentYarn && (
             <div className="p-5">
               <StockAdjustmentForm yarn={currentYarn} onClose={() => setIsStockDialogOpen(false)} onSuccess={handleFormSuccess} />
-              <p className="mt-4 text-sm text-neutral-500">Note: Stock adjustment functionality is under development.</p>
-              
-              <Button onClick={() => setIsStockDialogOpen(false)}>Close</Button>
             </div>
           )}
         </DialogContent>

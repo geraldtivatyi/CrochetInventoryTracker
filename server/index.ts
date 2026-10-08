@@ -3,7 +3,18 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
-app.use(express.json());
+const preservePaystackWebhookBody = (req: Request, _res: Response, buffer: Buffer) => {
+  if (req.path === "/api/paystack/webhook") {
+    (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+  }
+};
+const defaultJsonParser = express.json({ verify: preservePaystackWebhookBody });
+const productImageJsonParser = express.json({ limit: "8mb", verify: preservePaystackWebhookBody });
+app.use((req, res, next) =>
+  (req.path === "/api/shop" || req.path.startsWith("/api/shop/")
+    ? productImageJsonParser
+    : defaultJsonParser)(req, res, next),
+);
 app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {

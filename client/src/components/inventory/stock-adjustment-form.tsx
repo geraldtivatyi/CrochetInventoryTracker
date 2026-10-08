@@ -65,10 +65,9 @@ export default function StockAdjustmentForm({ yarn, onClose, onSuccess }: StockA
       
       // Update the yarn stock
       await apiRequest("PATCH", `/api/yarns/${yarn.id}`, {
-        quantityInStock: newQuantity
+        quantityInStock: newQuantity,
+        adjustmentReason: values.reason,
       });
-      
-      // Log the activity
       const actionText = values.adjustmentType === "add" ? "Added" : 
                         values.adjustmentType === "remove" ? "Removed" : "Set";
       

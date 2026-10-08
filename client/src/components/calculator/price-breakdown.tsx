@@ -17,6 +17,7 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [updatingProject, setUpdatingProject] = useState(false);
+  const [error, setError] = useState("");
 
   // Fetch projects to get current project data
   const { data: projects = [] } = useQuery<Project[]>({
@@ -27,43 +28,27 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
     ? projects.find(p => p.id === calculation.projectId)
     : null;
   
-  const handleSave = () => {
-    // In a real app, this would save the calculation to a "saved calculations" list
-    toast({
-      title: "Calculation saved",
-      description: "The price calculation has been saved to your records",
-    });
-  };
-
   const handleUpdateProject = async () => {
     if (!calculation || !currentProject) return;
     
     setUpdatingProject(true);
+    setError("");
     try {
-      // Update the project with the new calculated values
-      const updatedProject = {
-        ...currentProject,
+      await apiRequest("PATCH", `/api/projects/${currentProject.id}`, {
         ballsNeeded: calculation.ballsUsed,
         timeToMake: calculation.laborHours,
-        // Store the calculated price in project notes or a new field
-        notes: `Calculated price: ${formatCurrency(calculation.finalPrice)}${currentProject.notes ? ` | ${currentProject.notes}` : ''}`
-      };
-
-      await apiRequest("PATCH", `/api/projects/${currentProject.id}`, updatedProject);
+      });
       queryClient.invalidateQueries({ queryKey: ['/api/projects'] });
       queryClient.invalidateQueries({ queryKey: ['/api/dashboard'] });
       
       toast({
-        title: "Project updated",
-        description: `${currentProject.name} has been updated with the calculated pricing`,
+        title: "Project requirements updated",
+        description: `${currentProject.name} now uses ${calculation.ballsUsed} balls and ${calculation.laborHours} hours.`,
       });
       
-      // Redirect to projects page after 1 second
-      setTimeout(() => {
-        setLocation('/projects');
-      }, 1000);
+      setLocation('/projects');
     } catch (error) {
-      console.error("Error updating project:", error);
+      setError(error instanceof Error ? error.message : "There was a problem updating the project");
       toast({
         title: "Error",
         description: "There was a problem updating the project",
@@ -95,6 +80,8 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
     <Card className="bg-white rounded-lg shadow p-5 sticky top-6">
       <h3 className="font-medium text-lg mb-4">Price Breakdown</h3>
       
+      <p className="mb-4 text-sm text-neutral-600">This calculation was saved to your records when you selected Calculate Price.</p>
+      {error && <p role="alert" className="mb-4 text-sm text-red-600">{error}</p>}
       <div className="space-y-4">
         <div className="flex justify-between items-center py-2 border-b border-neutral-200">
           <span className="text-neutral-600">
@@ -147,18 +134,11 @@ export default function PriceBreakdown({ calculation, selectedYarn }: PriceBreak
                 "Updating..."
               ) : (
                 <>
-                  <i className="ri-refresh-line mr-1"></i> Update Project Pricing
+                  <i className="ri-refresh-line mr-1"></i> Update Project Requirements
                 </>
               )}
             </Button>
           )}
-          <Button
-            variant="accent"
-            className="w-full"
-            onClick={handleSave}
-          >
-            <i className="ri-save-line mr-1"></i> Save Calculation
-          </Button>
           <Button
             variant="outline"
             className="w-full"

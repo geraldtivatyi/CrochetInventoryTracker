@@ -1,5 +1,10 @@
 import type { Config } from "tailwindcss";
 
+const scale = (name: string) =>
+  Object.fromEntries(
+    [50, 100, 200, 300, 400, 500, 600, 700, 800, 900].map((n) => [n, `rgb(var(--${name}-${n}) / <alpha-value>)`]),
+  );
+
 export default {
   darkMode: ["class"],
   content: ["./client/index.html", "./client/src/**/*.{js,jsx,ts,tsx}"],
@@ -24,6 +29,7 @@ export default {
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
+          ...scale("primary"),
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
@@ -36,7 +42,9 @@ export default {
         accent: {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
+          ...scale("accent"),
         },
+        neutral: scale("neutral"),
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",

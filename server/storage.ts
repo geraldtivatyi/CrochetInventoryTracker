@@ -6,10 +6,81 @@ import {
   PriceCalculation,
   InsertPriceCalculation,
   ActivityLog,
-  InsertActivityLog
+  InsertActivityLog,
+  User,
+  AuthToken,
+  TokenPurpose,
+  Shop,
+  ShopOrder,
+  NotificationJob,
+  ShopProduct,
 } from "@shared/schema";
 
+export type ShopRecord = Omit<Shop, "id" | "userId" | "createdAt" | "updatedAt">;
+export type ShopProductRecord = Omit<
+  ShopProduct,
+  "id" | "shopId" | "imageData" | "imageMimeType" | "createdAt" | "updatedAt"
+>;
+export type ShopProductView = Omit<ShopProduct, "imageData">;
+export type ShopProductImage = { data: Buffer; mimeType: string };
+export type ShopBrandingImage = ShopProductImage;
+
+function withoutProductImageData(product: ShopProduct): ShopProductView {
+  const { imageData, ...view } = product;
+  void imageData;
+  return view;
+}
+
 export interface IStorage {
+  // Auth Methods
+  countUsers(): Promise<number>;
+  getUserById(id: number): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  listUsers(): Promise<User[]>;
+  createUser(email: string, passwordHash: string, isOwner?: boolean): Promise<User>;
+  deleteUser(id: number): Promise<void>;
+  updateUser(
+    id: number,
+    data: Partial<Pick<User, "passwordHash" | "otpEnabled" | "failedLoginAttempts" | "lockedUntil">>
+  ): Promise<void>;
+  // Replaces any existing token with the same user and purpose
+  saveToken(userId: number, purpose: TokenPurpose, tokenHash: string, expiresAt: Date): Promise<void>;
+  getToken(userId: number, purpose: TokenPurpose): Promise<AuthToken | undefined>;
+  incrementTokenAttempts(id: number): Promise<void>;
+  deleteTokens(userId: number, purpose?: TokenPurpose): Promise<void>;
+
+  // Each account owns an isolated shop and product catalogue
+  getShopForUser(userId: number): Promise<Shop | undefined>;
+  getShopById(shopId: number): Promise<Shop | undefined>;
+  getShopBySlug(slug: string, liveOnly?: boolean): Promise<Shop | undefined>;
+  getShopByDomain(domain: string): Promise<Shop | undefined>;
+  saveShop(userId: number, shop: ShopRecord, brandingImage?: ShopBrandingImage | null): Promise<Shop>;
+  getShopBrandingImage(shopId: number): Promise<ShopBrandingImage | undefined>;
+  listShopProducts(shopId: number, publishedOnly?: boolean): Promise<ShopProductView[]>;
+  createShopProduct(shopId: number, product: ShopProductRecord, image?: ShopProductImage): Promise<ShopProductView>;
+  updateShopProduct(
+    shopId: number,
+    id: number,
+    product: Partial<ShopProductRecord>,
+    image?: ShopProductImage | null,
+  ): Promise<ShopProductView | undefined>;
+  getShopProductImage(shopId: number, id: number): Promise<ShopProductImage | undefined>;
+  deleteShopProduct(shopId: number, id: number): Promise<boolean>;
+  createShopOrder(order: Omit<ShopOrder, "id" | "createdAt" | "updatedAt">): Promise<ShopOrder>;
+  getShopOrderByReference(reference: string): Promise<ShopOrder | undefined>;
+  listShopOrders(shopId: number): Promise<ShopOrder[]>;
+  updateShopOrder(
+    reference: string,
+    data: Partial<Pick<ShopOrder, "status" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
+  ): Promise<ShopOrder | undefined>;
+  enqueueNotification(job: Omit<NotificationJob, "id" | "createdAt" | "updatedAt">): Promise<void>;
+  claimDueNotificationJobs(now: Date, limit: number): Promise<NotificationJob[]>;
+  updateNotificationJob(
+    id: number,
+    data: Partial<Pick<NotificationJob, "status" | "runAt" | "lastError">>,
+  ): Promise<void>;
+  listOrdersForTracking(): Promise<Array<{ shop: Shop; order: ShopOrder }>>;
+
   // Yarn Methods
   getAllYarns(): Promise<Yarn[]>;
   getYarn(id: number): Promise<Yarn | undefined>;
@@ -44,6 +115,217 @@ export class MemStorage implements IStorage {
   private projectsCurrentId: number;
   private calculationsCurrentId: number;
   private activitiesCurrentId: number;
+  private users: User[] = [];
+  private tokens: AuthToken[] = [];
+  private authId = 1;
+  private shops: Shop[] = [];
+  private shopProducts: ShopProduct[] = [];
+  private shopOrders: ShopOrder[] = [];
+  private notificationJobs: NotificationJob[] = [];
+  private shopBrandingImages = new Map<number, ShopBrandingImage>();
+  private shopId = 1;
+  private shopProductId = 1;
+  private notificationJobId = 1;
+
+  async getShopForUser(userId: number) {
+    return this.shops.find((shop) => shop.userId === userId);
+  }
+  async getShopById(shopId: number) {
+    return this.shops.find((shop) => shop.id === shopId);
+  }
+  async getShopBySlug(slug: string, liveOnly = false) {
+    return this.shops.find((shop) => shop.slug === slug && (!liveOnly || shop.isLive));
+  }
+  async getShopByDomain(domain: string) {
+    return this.shops.find((shop) => shop.customDomain === domain);
+  }
+  async saveShop(userId: number, data: ShopRecord, brandingImage?: ShopBrandingImage | null) {
+    if (brandingImage !== undefined) {
+      const shopId = this.shops.find((shop) => shop.userId === userId)?.id;
+      if (shopId !== undefined) {
+        if (brandingImage) this.shopBrandingImages.set(shopId, brandingImage);
+        else this.shopBrandingImages.delete(shopId);
+      }
+    }
+    const existing = this.shops.find((shop) => shop.userId === userId);
+    const now = new Date();
+    if (existing) {
+      Object.assign(existing, data, { updatedAt: now });
+      return existing;
+    }
+    const shop: Shop = {
+      ...data,
+      id: this.shopId++,
+      userId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.shops.push(shop);
+    if (brandingImage) this.shopBrandingImages.set(shop.id, brandingImage);
+    return shop;
+  }
+  async getShopBrandingImage(shopId: number) {
+    return this.shopBrandingImages.get(shopId);
+  }
+  async listShopProducts(shopId: number, publishedOnly = false) {
+    return this.shopProducts
+      .filter((product) => product.shopId === shopId && (!publishedOnly || product.isPublished))
+      .map(withoutProductImageData);
+  }
+  async createShopProduct(shopId: number, data: ShopProductRecord, image?: ShopProductImage) {
+    const now = new Date();
+    const product: ShopProduct = {
+      ...data,
+      imageData: image?.data ?? null,
+      imageMimeType: image?.mimeType ?? null,
+      id: this.shopProductId++,
+      shopId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.shopProducts.push(product);
+    return withoutProductImageData(product);
+  }
+  async updateShopProduct(
+    shopId: number,
+    id: number,
+    data: Partial<ShopProductRecord>,
+    image?: ShopProductImage | null,
+  ) {
+    const product = this.shopProducts.find((item) => item.shopId === shopId && item.id === id);
+    if (!product) return undefined;
+    Object.assign(
+      product,
+      data,
+      image !== undefined
+        ? { imageData: image?.data ?? null, imageMimeType: image?.mimeType ?? null }
+        : {},
+      { updatedAt: new Date() },
+    );
+    return withoutProductImageData(product);
+  }
+  async getShopProductImage(shopId: number, id: number) {
+    const product = this.shopProducts.find((item) => item.shopId === shopId && item.id === id);
+    if (!product?.imageData || !product.imageMimeType) return undefined;
+    return { data: product.imageData, mimeType: product.imageMimeType };
+  }
+  async deleteShopProduct(shopId: number, id: number) {
+    const original = this.shopProducts.length;
+    this.shopProducts = this.shopProducts.filter((item) => item.shopId !== shopId || item.id !== id);
+    return this.shopProducts.length < original;
+  }
+  async createShopOrder(data: Omit<ShopOrder, "id" | "createdAt" | "updatedAt">) {
+    const now = new Date();
+    const order: ShopOrder = { ...data, id: this.shopOrders.length + 1, createdAt: now, updatedAt: now };
+    this.shopOrders.push(order);
+    return order;
+  }
+  async getShopOrderByReference(reference: string) {
+    return this.shopOrders.find((order) => order.reference === reference);
+  }
+  async listShopOrders(shopId: number) {
+    return this.shopOrders.filter((order) => order.shopId === shopId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+  async updateShopOrder(
+    reference: string,
+    data: Partial<Pick<ShopOrder, "status" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
+  ) {
+    const order = this.shopOrders.find((item) => item.reference === reference);
+    if (!order) return undefined;
+    Object.assign(order, data, { updatedAt: new Date() });
+    return order;
+  }
+  async enqueueNotification(data: Omit<NotificationJob, "id" | "createdAt" | "updatedAt">) {
+    if (this.notificationJobs.some((job) => job.dedupeKey === data.dedupeKey)) return;
+    const now = new Date();
+    this.notificationJobs.push({ ...data, id: this.notificationJobId++, createdAt: now, updatedAt: now });
+  }
+  async claimDueNotificationJobs(now: Date, limit: number) {
+    const due = this.notificationJobs
+      .filter((job) =>
+        (job.status === "queued" && job.runAt <= now) ||
+        (job.status === "sending" && now.getTime() - job.updatedAt.getTime() >= 5 * 60 * 1000),
+      )
+      .sort((a, b) => a.runAt.getTime() - b.runAt.getTime())
+      .slice(0, limit);
+    for (const job of due) {
+      job.status = "sending";
+      job.attempts += 1;
+      job.updatedAt = now;
+    }
+    return due;
+  }
+  async updateNotificationJob(
+    id: number,
+    data: Partial<Pick<NotificationJob, "status" | "runAt" | "lastError">>,
+  ) {
+    const job = this.notificationJobs.find((item) => item.id === id);
+    if (job) Object.assign(job, data, { updatedAt: new Date() });
+  }
+  async listOrdersForTracking() {
+    return this.shopOrders.flatMap((order) => {
+      const shop = this.shops.find((candidate) => candidate.id === order.shopId);
+      return shop && order.status === "paid" && order.delivery.shipment
+        ? [{ shop, order }]
+        : [];
+    });
+  }
+  async countUsers() {
+    return this.users.length;
+  }
+  async getUserById(id: number) {
+    return this.users.find((u) => u.id === id);
+  }
+  async getUserByEmail(email: string) {
+    return this.users.find((u) => u.email === email);
+  }
+  async listUsers() {
+    return [...this.users];
+  }
+  async deleteUser(id: number) {
+    this.users = this.users.filter((u) => u.id !== id);
+    await this.deleteTokens(id);
+  }
+  async createUser(email: string, passwordHash: string, isOwner = false) {
+    const user: User = {
+      id: this.authId++,
+      email,
+      passwordHash,
+      otpEnabled: false,
+      isOwner,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      createdAt: new Date(),
+    };
+    this.users.push(user);
+    return user;
+  }
+  async updateUser(id: number, data: Partial<User>) {
+    const user = this.users.find((u) => u.id === id);
+    if (user) Object.assign(user, data);
+  }
+  async saveToken(userId: number, purpose: TokenPurpose, tokenHash: string, expiresAt: Date) {
+    await this.deleteTokens(userId, purpose);
+    this.tokens.push({
+      id: this.authId++,
+      userId,
+      purpose,
+      tokenHash,
+      attempts: 0,
+      expiresAt,
+      createdAt: new Date(),
+    });
+  }
+  async getToken(userId: number, purpose: TokenPurpose) {
+    return this.tokens.find((t) => t.userId === userId && t.purpose === purpose);
+  }
+  async incrementTokenAttempts(id: number) {
+    const t = this.tokens.find((t) => t.id === id);
+    if (t) t.attempts++;
+  }
+  async deleteTokens(userId: number, purpose?: TokenPurpose) {
+    this.tokens = this.tokens.filter((t) => !(t.userId === userId && (!purpose || t.purpose === purpose)));
+  }
 
   constructor() {
     this.yarns = new Map();
@@ -54,95 +336,6 @@ export class MemStorage implements IStorage {
     this.projectsCurrentId = 1;
     this.calculationsCurrentId = 1;
     this.activitiesCurrentId = 1;
-
-    // Add some initial data
-    this.initializeData();
-  }
-
-  private initializeData() {
-    // Sample yarns
-    this.createYarn({
-      type: "Merino Wool",
-      color: "Crimson Red",
-      colorHex: "#B22222",
-      costPerBall: 6.99,
-      quantityInStock: 12,
-      notes: "Premium soft"
-    });
-    
-    this.createYarn({
-      type: "Cotton Blend",
-      color: "Sky Blue",
-      colorHex: "#87CEEB",
-      costPerBall: 4.50,
-      quantityInStock: 2,
-      notes: "Lightweight"
-    });
-    
-    this.createYarn({
-      type: "Alpaca Wool",
-      color: "Caramel",
-      colorHex: "#C68E17",
-      costPerBall: 8.25,
-      quantityInStock: 3,
-      notes: "Extra soft"
-    });
-    
-    this.createYarn({
-      type: "Chunky Acrylic",
-      color: "Lavender",
-      colorHex: "#B57EDC",
-      costPerBall: 5.75,
-      quantityInStock: 8,
-      notes: "Bulky weight"
-    });
-
-    // Sample projects
-    this.createProject({
-      name: "Winter Scarf",
-      category: "Accessory",
-      ballsNeeded: 3,
-      preferredYarnType: "Merino Wool",
-      timeToMake: 5,
-      notes: "Classic pattern"
-    });
-    
-    this.createProject({
-      name: "Baby Blanket",
-      category: "Home",
-      ballsNeeded: 8,
-      preferredYarnType: "Cotton Blend",
-      timeToMake: 12,
-      notes: "Simple stitch pattern"
-    });
-    
-    this.createProject({
-      name: "Amigurumi Set",
-      category: "Toy",
-      ballsNeeded: 5,
-      preferredYarnType: "Chunky Acrylic",
-      timeToMake: 8,
-      notes: "Set of 3 small animals"
-    });
-
-    // Sample activities
-    this.logActivity({
-      type: "add_yarn",
-      entityId: 1,
-      description: "Added new yarn: Merino Wool - Crimson Red"
-    });
-    
-    this.logActivity({
-      type: "update_project",
-      entityId: 1,
-      description: "Updated project: Winter Scarf"
-    });
-    
-    this.logActivity({
-      type: "calculate_price",
-      entityId: 2,
-      description: "Calculated price for: Baby Blanket"
-    });
   }
 
   // Yarn methods
@@ -269,19 +462,15 @@ export class MemStorage implements IStorage {
 
 // Initialize storage based on presence of a database URL.
 const databaseUrl = process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL;
+export const dataPersistence = databaseUrl ? "database" : "memory";
 
 let storageInstance: IStorage;
 
 if (databaseUrl) {
-  try {
-    const { DatabaseStorage } = await import("./db");
-    storageInstance = new DatabaseStorage();
-  } catch (err) {
-    console.error("Failed to initialize DatabaseStorage, falling back to in-memory storage:", err);
-    storageInstance = new MemStorage();
-  }
+  const { DatabaseStorage } = await import("./db");
+  storageInstance = new DatabaseStorage();
 } else {
-  console.log("No database URL found; using in-memory storage.");
+  console.warn("No database URL found; using empty, non-persistent in-memory storage.");
   storageInstance = new MemStorage();
 }
 

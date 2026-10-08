@@ -24,7 +24,7 @@ export default function LowStockTable({ yarns, onRestock }: LowStockTableProps) 
           {yarns.length === 0 ? (
             <TableRow>
               <TableCell colSpan={4} className="text-center py-6 text-neutral-500">
-                No low stock items found
+                No yarn varieties are at or below the 5-ball threshold
               </TableCell>
             </TableRow>
           ) : (
@@ -53,7 +53,7 @@ export default function LowStockTable({ yarns, onRestock }: LowStockTableProps) 
                     className="text-accent-500 hover:text-accent-700 p-0 h-auto"
                     onClick={() => onRestock(yarn.id)}
                   >
-                    Restock
+                    Add 5 balls
                   </Button>
                 </TableCell>
               </TableRow>

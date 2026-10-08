@@ -11,6 +11,12 @@ services:
       # For Postgres 18+, mount at /var/lib/postgresql so versioned subdirs work
       - db_data_v18:/var/lib/postgresql
       - ./drizzle/0000_initial.sql:/docker-entrypoint-initdb.d/0000_initial.sql:ro
+      - ./drizzle/0001_auth.sql:/docker-entrypoint-initdb.d/0001_auth.sql:ro
+      - ./drizzle/0002_shop_shipping.sql:/docker-entrypoint-initdb.d/0002_shop_shipping.sql:ro
+      - ./drizzle/0003_shop_product_images.sql:/docker-entrypoint-initdb.d/0003_shop_product_images.sql:ro
+      - ./drizzle/0004_shop_branding.sql:/docker-entrypoint-initdb.d/0004_shop_branding.sql:ro
+      - ./drizzle/0005_shop_checkout.sql:/docker-entrypoint-initdb.d/0005_shop_checkout.sql:ro
+      - ./drizzle/0006_order_notifications.sql:/docker-entrypoint-initdb.d/0006_order_notifications.sql:ro
 
   app:
     build: .
@@ -22,6 +28,20 @@ services:
       DB_PORT: 5432
       PORT: 5173
       NODE_ENV: production
+      SESSION_SECRET: "${SESSION_SECRET:-change-me-to-a-long-random-string}"
+      APP_URL: "${APP_URL:-http://localhost:5173}"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASS: "${SMTP_PASS:-}"
+      SMTP_SECURE: "${SMTP_SECURE:-}"
+      MAIL_FROM: "${MAIL_FROM:-CrochetNook <no-reply@example.com>}"
+      # Generate a unique 32-byte key (64 hex characters) and keep it stable.
+      COURIERGUY_ENCRYPTION_KEY: "${COURIERGUY_ENCRYPTION_KEY:-}"
+      SHOP_SECRETS_ENCRYPTION_KEY: "${SHOP_SECRETS_ENCRYPTION_KEY:-}"
+      COURIERGUY_AWS_REGION: "${COURIERGUY_AWS_REGION:-eu-west-1}"
+      PAYSTACK_SECRET_KEY: "${PAYSTACK_SECRET_KEY:-}"
+      WHATSAPP_GRAPH_API_VERSION: "${WHATSAPP_GRAPH_API_VERSION:-v23.0}"
     ports:
       - "5173:5173"
     restart: unless-stopped
