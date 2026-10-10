@@ -21,7 +21,7 @@ export default function Header() {
     <header className="bg-white shadow">
       <div className="container mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center">
         <div className="flex items-center mb-4 sm:mb-0">
-          <i className="ri-thread-line text-primary-500 text-3xl mr-2"></i>
+          <img src="/logo.png" alt="CrochetNook logo" className="mr-2 h-10 w-10 object-contain" />
           <h1 className="font-poppins font-bold text-2xl text-neutral-900">CrochetNook</h1>
         </div>
         <nav className="flex space-x-4">
