@@ -13,6 +13,7 @@ import {
   Shop,
   ShopOrder,
   NotificationJob,
+  PlatformIntegrations,
   ShopProduct,
   ProjectDetails,
 } from "@shared/schema";
@@ -40,12 +41,13 @@ export interface IStorage {
   countUsers(): Promise<number>;
   getUserById(id: number): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByWhatsAppPhone(phone: string): Promise<User | undefined>;
   listUsers(): Promise<User[]>;
   createUser(email: string, passwordHash: string, isOwner?: boolean): Promise<User>;
   deleteUser(id: number): Promise<void>;
   updateUser(
     id: number,
-    data: Partial<Pick<User, "passwordHash" | "otpEnabled" | "failedLoginAttempts" | "lockedUntil" | "defaultHourlyRate">>
+    data: Partial<Pick<User, "passwordHash" | "otpEnabled" | "failedLoginAttempts" | "lockedUntil" | "defaultHourlyRate" | "whatsappPhone">>
   ): Promise<void>;
   // Replaces any existing token with the same user and purpose
   saveToken(userId: number, purpose: TokenPurpose, tokenHash: string, expiresAt: Date): Promise<void>;
@@ -89,6 +91,10 @@ export interface IStorage {
     data: Partial<Pick<NotificationJob, "status" | "runAt" | "lastError">>,
   ): Promise<void>;
   listOrdersForTracking(): Promise<Array<{ shop: Shop; order: ShopOrder }>>;
+  getPlatformIntegrations(): Promise<PlatformIntegrations>;
+  savePlatformIntegrations(data: Omit<PlatformIntegrations, "id" | "updatedAt">): Promise<PlatformIntegrations>;
+  claimWhatsAppWebhookMessage(messageId: string): Promise<boolean>;
+  releaseWhatsAppWebhookMessage(messageId: string): Promise<void>;
 
   // Yarn Methods
   getAllYarns(): Promise<Yarn[]>;
@@ -134,6 +140,23 @@ export class MemStorage implements IStorage {
   private shopProducts: ShopProduct[] = [];
   private shopOrders: ShopOrder[] = [];
   private notificationJobs: NotificationJob[] = [];
+  private webhookMessageIds = new Set<string>();
+  private integrations: PlatformIntegrations = {
+    id: 1,
+    whatsappPhoneNumberId: "",
+    whatsappAccessTokenEncrypted: null,
+    whatsappAppSecretEncrypted: null,
+    whatsappVerifyTokenEncrypted: null,
+    whatsappOrderRequestTemplate: "",
+    whatsappOrderPaidTemplate: "",
+    whatsappOrderReceiptTemplate: "",
+    whatsappTrackingTemplate: "",
+    whatsappPickupTemplate: "",
+    whatsappTemplateLanguage: "en_ZA",
+    courierAccessKeyEncrypted: null,
+    courierSecretEncrypted: null,
+    updatedAt: new Date(),
+  };
   private shopBrandingImages = new Map<number, ShopBrandingImage>();
   private shopId = 1;
   private shopProductId = 1;
@@ -291,6 +314,21 @@ export class MemStorage implements IStorage {
         : [];
     });
   }
+  async getPlatformIntegrations() {
+    return this.integrations;
+  }
+  async savePlatformIntegrations(data: Omit<PlatformIntegrations, "id" | "updatedAt">) {
+    this.integrations = { ...this.integrations, ...data, id: 1, updatedAt: new Date() };
+    return this.integrations;
+  }
+  async claimWhatsAppWebhookMessage(messageId: string) {
+    if (this.webhookMessageIds.has(messageId)) return false;
+    this.webhookMessageIds.add(messageId);
+    return true;
+  }
+  async releaseWhatsAppWebhookMessage(messageId: string) {
+    this.webhookMessageIds.delete(messageId);
+  }
   async countUsers() {
     return this.users.length;
   }
@@ -299,6 +337,9 @@ export class MemStorage implements IStorage {
   }
   async getUserByEmail(email: string) {
     return this.users.find((u) => u.email === email);
+  }
+  async getUserByWhatsAppPhone(phone: string) {
+    return this.users.find((user) => user.whatsappPhone === phone);
   }
   async listUsers() {
     return [...this.users];
@@ -314,6 +355,7 @@ export class MemStorage implements IStorage {
       passwordHash,
       otpEnabled: false,
       defaultHourlyRate: null,
+      whatsappPhone: null,
       isOwner,
       failedLoginAttempts: 0,
       lockedUntil: null,

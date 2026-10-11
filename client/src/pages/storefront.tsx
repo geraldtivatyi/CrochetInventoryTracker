@@ -244,17 +244,15 @@ function CheckoutDialog({
                 <Input id="checkout-email" type="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); invalidateQuote(); }} required maxLength={254} />
               </div>
             </div>
-            {shop.paymentMode === "paystack_test" && (
-              <label className="flex cursor-pointer items-start gap-2 text-sm text-neutral-700">
-                <input
-                  type="checkbox"
-                  checked={whatsappUpdates}
-                  onChange={(event) => setWhatsappUpdates(event.target.checked)}
-                  className="mt-1"
-                />
-                <span>I consent to receive WhatsApp updates about this order and its delivery on this number.</span>
-              </label>
-            )}
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-neutral-700">
+              <input
+                type="checkbox"
+                checked={whatsappUpdates}
+                onChange={(event) => setWhatsappUpdates(event.target.checked)}
+                className="mt-1"
+              />
+              <span>I consent to receive WhatsApp updates about this order and its delivery on this number.</span>
+            </label>
           </section>
 
           <section className="space-y-3">
@@ -297,9 +295,13 @@ function CheckoutDialog({
             </section>
           )}
 
-          {method === "locker" && shop.paymentMode === "paystack_test" && (
+          {method === "locker" && (
             <section className="space-y-2">
-              <p className="text-sm text-neutral-600">Use your location to find nearby Courier Guy lockers.</p>
+              <p className="text-sm text-neutral-600">
+                {shop.paymentMode === "manual"
+                  ? "Find a nearby Courier Guy locker. The shop will arrange delivery there after payment and shipping cost are agreed."
+                  : "Use your location to find nearby Courier Guy lockers."}
+              </p>
               <Button type="button" variant="outline" onClick={findPickupPoints} disabled={busy}>
                 {busy ? "Searching…" : "Find nearby lockers"}
               </Button>
@@ -324,12 +326,6 @@ function CheckoutDialog({
               )}
             </section>
           )}
-          {method === "locker" && shop.paymentMode === "manual" && (
-            <p className="rounded-md bg-neutral-50 p-3 text-sm text-neutral-600">
-              The shop will contact you to agree on a suitable locker or delivery option.
-            </p>
-          )}
-
           {quoteIsValid && quote && shop.paymentMode === "paystack_test" && (
             <section className="space-y-3 rounded-md bg-neutral-50 p-4">
               <h3 className="font-medium">Choose a delivery rate</h3>
@@ -364,14 +360,14 @@ function CheckoutDialog({
             <Button
               type="submit"
               className="w-full"
-              disabled={busy || !items.length || (shop.paymentMode === "paystack_test" && method === "locker" && !selectedPickupPoint)}
+              disabled={busy || !items.length || (method === "locker" && !selectedPickupPoint)}
             >
               {busy ? "Preparing checkout…" : shop.paymentMode === "manual" ? "Review order request" : "Calculate delivery and total"}
             </Button>
           )}
           <p className="text-xs text-neutral-500">
             {shop.paymentMode === "manual"
-              ? "No payment is taken here. The shop will contact you to confirm the final total, payment method, and shipping."
+              ? "No payment is taken here. The shop will contact you to confirm the order, final delivery cost, and payment. Delivery will be arranged using your selected address or locker after these are agreed."
               : "Payments are currently processed in Paystack test mode. No real payment will be collected."}
           </p>
         </form>

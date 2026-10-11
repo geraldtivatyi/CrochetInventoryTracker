@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
-import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import express, { type Express, type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import { createServer, type Server } from "http";
 import { dataPersistence, storage } from "./storage";
 import { z } from "zod";
 import { authRouter, requireAuth, setupSession } from "./auth";
 import { createShipment, getPickupPoints, getRates } from "./courier-guy";
-import { decryptShopCredential, encryptShopCredential, encryptShopSecret } from "./shop-secrets";
+import { decryptShopCredential, decryptShopSecret, encryptShopCredential, encryptShopSecret } from "./shop-secrets";
 import { 
   insertYarnSchema, 
   projectDetailsSchema,
@@ -42,6 +42,8 @@ import {
   startNotificationWorkers,
 } from "./notifications";
 import { calculateShopMetrics } from "@shared/shop-metrics";
+import { normalizeWhatsAppNumber } from "./whatsapp";
+import { processWhatsAppWebhook, verifyWhatsAppSignature } from "./whatsapp-bot";
 
 const yarnUpdateRequestSchema = insertYarnSchema.partial().extend({
   adjustmentReason: z.string().trim().min(2).max(300).optional(),
@@ -74,29 +76,17 @@ async function publicShop(shop: NonNullable<Awaited<ReturnType<typeof storage.ge
     senderName: shop.senderName,
     senderEmail: shop.senderEmail,
     senderPhone: shop.senderPhone,
-    courierCredentialsConfigured: !!shop.courierAccessKeyEncrypted && !!shop.courierSecretEncrypted,
-    whatsappConfigured: !!shop.whatsappPhoneNumberId && !!shop.whatsappAccessTokenEncrypted,
-    whatsappPhoneNumberId: shop.whatsappPhoneNumberId ?? "",
-    whatsappOrderTemplate: shop.whatsappOrderTemplate,
-    whatsappTrackingTemplate: shop.whatsappTrackingTemplate,
-    whatsappReminderTemplate: shop.whatsappReminderTemplate,
-    whatsappTemplateLanguage: shop.whatsappTemplateLanguage,
   };
 }
 
-function courierCredentials(
-  shop: NonNullable<Awaited<ReturnType<typeof storage.getShopForUser>>>,
-  allowDisabledService = false,
-) {
-  if (!allowDisabledService && !shop.courierEnabled && !shop.lockersEnabled) {
-    throw new Error("Enable Courier Guy delivery or lockers in Shop settings first.");
-  }
-  if (!shop.courierAccessKeyEncrypted || !shop.courierSecretEncrypted) {
-    throw new Error("Courier Guy credentials are not configured for this shop.");
+async function courierCredentials() {
+  const integrations = await storage.getPlatformIntegrations();
+  if (!integrations.courierAccessKeyEncrypted || !integrations.courierSecretEncrypted) {
+    throw new Error("Courier Guy platform credentials are not configured in Admin settings.");
   }
   return {
-    accessKey: decryptShopCredential(shop.courierAccessKeyEncrypted),
-    secretKey: decryptShopCredential(shop.courierSecretEncrypted),
+    accessKey: decryptShopCredential(integrations.courierAccessKeyEncrypted),
+    secretKey: decryptShopCredential(integrations.courierSecretEncrypted),
   };
 }
 
@@ -108,6 +98,54 @@ function providerError(res: Response, error: unknown) {
 }
 
 const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const platformIntegrationUpdateSchema = z.object({
+  whatsappPhoneNumberId: z.string().trim().max(100).default(""),
+  whatsappAccessToken: z.string().max(2000).optional(),
+  whatsappAppSecret: z.string().max(500).optional(),
+  whatsappVerifyToken: z.string().max(500).optional(),
+  clearWhatsAppCredentials: z.boolean().default(false),
+  whatsappOrderRequestTemplate: z.string().trim().max(512).default(""),
+  whatsappOrderPaidTemplate: z.string().trim().max(512).default(""),
+  whatsappOrderReceiptTemplate: z.string().trim().max(512).default(""),
+  whatsappTrackingTemplate: z.string().trim().max(512).default(""),
+  whatsappPickupTemplate: z.string().trim().max(512).default(""),
+  whatsappTemplateLanguage: z.string().trim().regex(/^[a-z]{2,3}(?:_[A-Z]{2})?$/).default("en_ZA"),
+  courierAccessKey: z.string().trim().max(200).optional(),
+  courierSecret: z.string().max(500).optional(),
+  clearCourierCredentials: z.boolean().default(false),
+}).superRefine((settings, ctx) => {
+  for (const [field, name] of [
+    ["whatsappOrderRequestTemplate", "order request"],
+    ["whatsappOrderPaidTemplate", "order update"],
+    ["whatsappOrderReceiptTemplate", "order receipt"],
+    ["whatsappTrackingTemplate", "tracking"],
+    ["whatsappPickupTemplate", "pickup reminder"],
+  ] as const) {
+    const template = settings[field];
+    if (template && !/^[a-z0-9_]{1,512}$/.test(template)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Enter a valid approved WhatsApp ${name} template name`, path: [field] });
+    }
+  }
+});
+
+function publicPlatformIntegrations(settings: Awaited<ReturnType<typeof storage.getPlatformIntegrations>>) {
+  return {
+    whatsappPhoneNumberId: settings.whatsappPhoneNumberId,
+    whatsappConfigured: !!settings.whatsappPhoneNumberId &&
+      !!settings.whatsappAccessTokenEncrypted &&
+      !!settings.whatsappAppSecretEncrypted &&
+      !!settings.whatsappVerifyTokenEncrypted,
+    whatsappOrderRequestTemplate: settings.whatsappOrderRequestTemplate,
+    whatsappOrderPaidTemplate: settings.whatsappOrderPaidTemplate,
+    whatsappOrderReceiptTemplate: settings.whatsappOrderReceiptTemplate,
+    whatsappTrackingTemplate: settings.whatsappTrackingTemplate,
+    whatsappPickupTemplate: settings.whatsappPickupTemplate,
+    whatsappTemplateLanguage: settings.whatsappTemplateLanguage,
+    courierConfigured: !!settings.courierAccessKeyEncrypted && !!settings.courierSecretEncrypted,
+    webhookUrl: `${APP_URL}/api/whatsapp/webhook`,
+  };
+}
 
 function decodeProductImage(image: unknown): ShopProductImage {
   const parsed = shopProductImageSchema.parse(image);
@@ -348,6 +386,43 @@ function paystackWebhookRouter() {
   return router;
 }
 
+function whatsappWebhookRouter() {
+  const router = express.Router();
+  router.get("/", asyncRoute(async (req, res) => {
+    const settings = await storage.getPlatformIntegrations();
+    const configuredVerifyToken = settings.whatsappVerifyTokenEncrypted
+      ? decryptShopSecret(settings.whatsappVerifyTokenEncrypted)
+      : "";
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+    const suppliedToken = typeof token === "string" ? token : "";
+    const expectedBuffer = Buffer.from(configuredVerifyToken);
+    const suppliedBuffer = Buffer.from(suppliedToken);
+    const tokenMatches = expectedBuffer.length > 0 &&
+      expectedBuffer.length === suppliedBuffer.length &&
+      crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
+    if (mode !== "subscribe" || !tokenMatches || typeof challenge !== "string") {
+      return res.status(403).send("Webhook verification failed.");
+    }
+    return res.status(200).type("text/plain").send(challenge);
+  }));
+  router.post("/", asyncRoute(async (req, res) => {
+    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+    const settings = await storage.getPlatformIntegrations();
+    if (!rawBody || !settings.whatsappAppSecretEncrypted) {
+      return res.status(503).json({ message: "WhatsApp webhook is not configured." });
+    }
+    const appSecret = decryptShopSecret(settings.whatsappAppSecretEncrypted);
+    if (!verifyWhatsAppSignature(rawBody, req.get("x-hub-signature-256"), appSecret)) {
+      return res.status(401).json({ message: "Invalid WhatsApp webhook signature." });
+    }
+    await processWhatsAppWebhook(req.body);
+    return res.sendStatus(200);
+  }));
+  return router;
+}
+
 function storefrontRouter() {
   const router = express.Router();
   const checkoutLimiter = checkoutRateLimit(30, 15 * 60 * 1000);
@@ -465,7 +540,7 @@ function storefrontRouter() {
           email: input.deliveryContact.email,
           mobile_number: input.deliveryContact.phone,
         };
-        const credentials = courierCredentials(shop);
+        const credentials = await courierCredentials();
         let rawRates: unknown;
         try {
           rawRates = await getRates(credentials, shop.originAddress, {
@@ -741,11 +816,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await setupSession(app);
   app.use("/api/auth", authRouter());
   app.use("/api/paystack/webhook", paystackWebhookRouter());
+  app.use("/api/whatsapp/webhook", whatsappWebhookRouter());
   app.use("/api/storefront", storefrontRouter());
 
   // Prefix all routes with /api; everything below requires a signed-in user
   const router = express.Router();
   router.use(requireAuth);
+
+  const requirePlatformOwner: RequestHandler = (req, res, next) => {
+    if (!(req as Request & { user?: { isOwner?: boolean } }).user?.isOwner) {
+      return res.status(403).json({ message: "Only the platform administrator can manage integrations." });
+    }
+    return next();
+  };
+
+  router.get("/admin/integrations", requirePlatformOwner, asyncRoute(async (_req, res) => {
+    return res.json(publicPlatformIntegrations(await storage.getPlatformIntegrations()));
+  }));
+  router.put("/admin/integrations", requirePlatformOwner, asyncRoute(async (req, res) => {
+    const input = platformIntegrationUpdateSchema.parse(req.body);
+    const existing = await storage.getPlatformIntegrations();
+    let whatsappPhoneNumberId = input.whatsappPhoneNumberId;
+    let whatsappAccessTokenEncrypted = existing.whatsappAccessTokenEncrypted;
+    let whatsappAppSecretEncrypted = existing.whatsappAppSecretEncrypted;
+    let whatsappVerifyTokenEncrypted = existing.whatsappVerifyTokenEncrypted;
+    if (input.clearWhatsAppCredentials) {
+      whatsappPhoneNumberId = "";
+      whatsappAccessTokenEncrypted = null;
+      whatsappAppSecretEncrypted = null;
+      whatsappVerifyTokenEncrypted = null;
+    } else {
+      const hasNewWhatsAppSecret = !!(input.whatsappAccessToken || input.whatsappAppSecret || input.whatsappVerifyToken);
+      if (hasNewWhatsAppSecret) {
+        if (!whatsappPhoneNumberId || !input.whatsappAccessToken || !input.whatsappAppSecret || !input.whatsappVerifyToken) {
+          return res.status(400).json({ message: "Enter the WhatsApp phone number ID, access token, app secret, and webhook verify token together." });
+        }
+        whatsappAccessTokenEncrypted = encryptShopSecret(input.whatsappAccessToken);
+        whatsappAppSecretEncrypted = encryptShopSecret(input.whatsappAppSecret);
+        whatsappVerifyTokenEncrypted = encryptShopSecret(input.whatsappVerifyToken);
+      } else if (
+        !!whatsappPhoneNumberId !== !!whatsappAccessTokenEncrypted ||
+        !!whatsappAccessTokenEncrypted !== !!whatsappAppSecretEncrypted ||
+        !!whatsappAppSecretEncrypted !== !!whatsappVerifyTokenEncrypted
+      ) {
+        return res.status(400).json({ message: "Configure all WhatsApp credentials together, or clear them together." });
+      }
+    }
+
+    let courierAccessKeyEncrypted = existing.courierAccessKeyEncrypted;
+    let courierSecretEncrypted = existing.courierSecretEncrypted;
+    if (input.clearCourierCredentials) {
+      courierAccessKeyEncrypted = null;
+      courierSecretEncrypted = null;
+    } else if (input.courierAccessKey || input.courierSecret) {
+      if (!input.courierAccessKey || !input.courierSecret) {
+        return res.status(400).json({ message: "Enter both the Courier Guy access key and secret." });
+      }
+      courierAccessKeyEncrypted = encryptShopCredential(input.courierAccessKey);
+      courierSecretEncrypted = encryptShopCredential(input.courierSecret);
+    }
+
+    const settings = await storage.savePlatformIntegrations({
+      whatsappPhoneNumberId,
+      whatsappAccessTokenEncrypted,
+      whatsappAppSecretEncrypted,
+      whatsappVerifyTokenEncrypted,
+      whatsappOrderRequestTemplate: input.whatsappOrderRequestTemplate,
+      whatsappOrderPaidTemplate: input.whatsappOrderPaidTemplate,
+      whatsappOrderReceiptTemplate: input.whatsappOrderReceiptTemplate,
+      whatsappTrackingTemplate: input.whatsappTrackingTemplate,
+      whatsappPickupTemplate: input.whatsappPickupTemplate,
+      whatsappTemplateLanguage: input.whatsappTemplateLanguage,
+      courierAccessKeyEncrypted,
+      courierSecretEncrypted,
+    });
+    return res.json(publicPlatformIntegrations(settings));
+  }));
+  router.patch("/admin/users/:id/whatsapp-phone", requirePlatformOwner, asyncRoute(async (req, res) => {
+    const input = z.object({ whatsappPhone: z.string().trim().max(30) }).parse(req.body);
+    const userId = Number(req.params.id);
+    if (!Number.isSafeInteger(userId) || userId < 1) return res.status(404).json({ message: "Account not found." });
+    const user = await storage.getUserById(userId);
+    if (!user) return res.status(404).json({ message: "Account not found." });
+    let whatsappPhone: string | null = null;
+    if (input.whatsappPhone) {
+      try {
+        whatsappPhone = normalizeWhatsAppNumber(input.whatsappPhone);
+      } catch (error) {
+        return res.status(400).json({ message: error instanceof Error ? error.message : "Enter a valid WhatsApp number." });
+      }
+      const existingNumberOwner = await storage.getUserByWhatsAppPhone(whatsappPhone);
+      if (existingNumberOwner && existingNumberOwner.id !== user.id) {
+        return res.status(409).json({ message: "This WhatsApp number is already assigned to another account." });
+      }
+    }
+    await storage.updateUser(user.id, { whatsappPhone });
+    const updated = await storage.getUserById(user.id);
+    return res.json(updated ? { id: updated.id, email: updated.email, whatsappPhone: updated.whatsappPhone } : null);
+  }));
 
   // === Tenant shop settings and catalogue ===
   router.get(
@@ -788,54 +956,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      let accessKeyEncrypted = data.clearCourierCredentials
-        ? null
-        : existing?.courierAccessKeyEncrypted ?? null;
-      let secretEncrypted = data.clearCourierCredentials
-        ? null
-        : existing?.courierSecretEncrypted ?? null;
-      if (data.courierAccessKey || data.courierSecret) {
-        if (!data.courierAccessKey || !data.courierSecret) {
-          return res.status(400).json({ message: "Enter both the Courier Guy access key and secret key" });
-        }
-        accessKeyEncrypted = encryptShopCredential(data.courierAccessKey);
-        secretEncrypted = encryptShopCredential(data.courierSecret);
-      }
-      const whatsappPhoneNumberId = data.clearWhatsAppCredentials ? "" : data.whatsappPhoneNumberId;
-      let whatsappTokenEncrypted = data.clearWhatsAppCredentials
-        ? null
-        : existing?.whatsappAccessTokenEncrypted ?? null;
-      if (data.whatsappAccessToken) {
-        if (!whatsappPhoneNumberId) {
-          return res.status(400).json({ message: "Enter the WhatsApp phone number ID with its access token" });
-        }
-        whatsappTokenEncrypted = encryptShopSecret(data.whatsappAccessToken);
-      }
-      if (data.clearWhatsAppCredentials) whatsappTokenEncrypted = null;
-      if (!!whatsappPhoneNumberId !== !!whatsappTokenEncrypted) {
-        return res.status(400).json({ message: "WhatsApp phone number ID and access token must be configured or cleared together" });
-      }
-      for (const [label, template] of [
-        ["order confirmation", data.whatsappOrderTemplate],
-        ["tracking update", data.whatsappTrackingTemplate],
-        ["pickup reminder", data.whatsappReminderTemplate],
-      ] as const) {
-        if (template && !/^[a-z0-9_]{1,512}$/.test(template)) {
-          return res.status(400).json({ message: `Enter a valid approved WhatsApp ${label} template name` });
-        }
-      }
-      if ((data.courierEnabled || data.lockersEnabled) && (!accessKeyEncrypted || !secretEncrypted) && data.isLive) {
-        return res.status(400).json({ message: "Add Courier Guy credentials before publishing courier delivery" });
-      }
-
       const {
         courierAccessKey,
         courierSecret,
         clearCourierCredentials,
         whatsappAccessToken,
         clearWhatsAppCredentials,
+        whatsappPhoneNumberId,
+        whatsappOrderTemplate,
+        whatsappTrackingTemplate,
+        whatsappReminderTemplate,
+        whatsappTemplateLanguage,
         ...settings
       } = data;
+      void courierAccessKey;
+      void courierSecret;
+      void clearCourierCredentials;
+      void whatsappAccessToken;
+      void clearWhatsAppCredentials;
+      void whatsappPhoneNumberId;
+      void whatsappOrderTemplate;
+      void whatsappTrackingTemplate;
+      void whatsappReminderTemplate;
+      void whatsappTemplateLanguage;
       const { brandingImage: uploadedBrandingImage, removeBrandingImage, ...shopSettings } = settings;
       if (removeBrandingImage && !existing) {
         return res.status(400).json({ message: "There is no saved branding image to remove" });
@@ -843,10 +986,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const shop = await storage.saveShop(userId, {
         ...shopSettings,
         customDomain: shopSettings.customDomain || null,
-        whatsappPhoneNumberId,
-        courierAccessKeyEncrypted: accessKeyEncrypted,
-        courierSecretEncrypted: secretEncrypted,
-        whatsappAccessTokenEncrypted: whatsappTokenEncrypted,
+        whatsappPhoneNumberId: "",
+        courierAccessKeyEncrypted: null,
+        courierSecretEncrypted: null,
+        whatsappAccessTokenEncrypted: null,
+        whatsappOrderTemplate: "",
+        whatsappTrackingTemplate: "",
+        whatsappReminderTemplate: "",
+        whatsappTemplateLanguage: "en_ZA",
       }, uploadedBrandingImage
         ? decodeBrandingImage(uploadedBrandingImage)
         : removeBrandingImage
@@ -969,7 +1116,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       try {
         const shipment = await createShipment(
-          courierCredentials(shop, true),
+          await courierCredentials(),
           shop.originAddress,
           {
             name: shop.senderName,
@@ -1035,7 +1182,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Enable courier delivery in Shop settings first" });
       }
       try {
-        res.json(await getRates(courierCredentials(shop), shop.originAddress, input));
+        res.json(await getRates(await courierCredentials(), shop.originAddress, input));
       } catch (error) {
         return providerError(res, error);
       }
@@ -1055,7 +1202,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       try {
         const response = await createShipment(
-          courierCredentials(shop),
+          await courierCredentials(),
           shop.originAddress,
           { name: shop.senderName, email: shop.senderEmail, mobile_number: shop.senderPhone },
           input,

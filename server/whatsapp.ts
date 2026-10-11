@@ -10,17 +10,12 @@ export function normalizeWhatsAppNumber(phone: string): string {
   return digits;
 }
 
-export async function sendWhatsAppTemplate(
+async function sendWhatsAppMessage(
   accessToken: string,
   phoneNumberId: string,
   recipient: string,
-  templateName: string,
-  language: string,
-  parameters: string[],
+  payload: Record<string, unknown>,
 ): Promise<void> {
-  if (!/^[a-z0-9_]{1,512}$/.test(templateName)) {
-    throw new Error("A valid approved WhatsApp message template name is required.");
-  }
   const response = await fetch(
     `https://graph.facebook.com/${GRAPH_API_VERSION}/${encodeURIComponent(phoneNumberId)}/messages`,
     {
@@ -32,23 +27,73 @@ export async function sendWhatsAppTemplate(
       body: JSON.stringify({
         messaging_product: "whatsapp",
         to: normalizeWhatsAppNumber(recipient),
-        type: "template",
-        template: {
-          name: templateName,
-          language: { code: language },
-          components: [{
-            type: "body",
-            parameters: parameters.map((text) => ({ type: "text", text: text.slice(0, 1024) || "-" })),
-          }],
-        },
+        ...payload,
       }),
       signal: AbortSignal.timeout(20_000),
     },
   );
-  const body = await response.json().catch(() => null) as {
-    error?: { message?: string };
-  } | null;
+  const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
   if (!response.ok) {
     throw new Error(body?.error?.message ?? `WhatsApp Cloud API returned HTTP ${response.status}.`);
   }
+}
+
+export async function sendWhatsAppTemplate(
+  accessToken: string,
+  phoneNumberId: string,
+  recipient: string,
+  templateName: string,
+  language: string,
+  parameters: string[],
+): Promise<void> {
+  if (!/^[a-z0-9_]{1,512}$/.test(templateName)) {
+    throw new Error("A valid approved WhatsApp message template name is required.");
+  }
+  await sendWhatsAppMessage(accessToken, phoneNumberId, recipient, {
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: language },
+      components: [{
+        type: "body",
+        parameters: parameters.map((text) => ({ type: "text", text: text.slice(0, 1024) || "-" })),
+      }],
+    },
+  });
+}
+
+export function sendWhatsAppText(
+  accessToken: string,
+  phoneNumberId: string,
+  recipient: string,
+  text: string,
+): Promise<void> {
+  return sendWhatsAppMessage(accessToken, phoneNumberId, recipient, {
+    type: "text",
+    text: { body: text.slice(0, 4096) },
+  });
+}
+
+export function sendWhatsAppList(
+  accessToken: string,
+  phoneNumberId: string,
+  recipient: string,
+  bodyText: string,
+  rows: Array<{ id: string; title: string; description?: string }>,
+): Promise<void> {
+  if (!rows.length || rows.length > 10) throw new Error("A WhatsApp list must contain between 1 and 10 rows.");
+  if (rows.some((row) => row.id.length > 200 || row.title.length > 24 || (row.description?.length ?? 0) > 72)) {
+    throw new Error("A WhatsApp list row exceeds the provider's supported length.");
+  }
+  return sendWhatsAppMessage(accessToken, phoneNumberId, recipient, {
+    type: "interactive",
+    interactive: {
+      type: "list",
+      body: { text: bodyText.slice(0, 1024) },
+      action: {
+        button: "Choose an option",
+        sections: [{ title: "Menu", rows }],
+      },
+    },
+  });
 }

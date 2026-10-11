@@ -4,7 +4,7 @@ import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
 const preservePaystackWebhookBody = (req: Request, _res: Response, buffer: Buffer) => {
-  if (req.path === "/api/paystack/webhook") {
+  if (req.path === "/api/paystack/webhook" || req.path === "/api/whatsapp/webhook") {
     (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
   }
 };

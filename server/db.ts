@@ -15,6 +15,7 @@ import {
   Shop,
   ShopOrder,
   NotificationJob,
+  PlatformIntegrations,
   ProjectDetails,
   users,
   authTokens,
@@ -22,6 +23,8 @@ import {
   shopProducts,
   shopOrders,
   notificationJobs,
+  platformIntegrations,
+  whatsappWebhookEvents,
   yarns,
   projects,
   priceCalculations,
@@ -84,6 +87,8 @@ const ensureAuthTables = (async () => {
     created_at timestamp NOT NULL DEFAULT now()
   )`);
   await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS default_hourly_rate real`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS whatsapp_phone text`);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS users_whatsapp_phone_unique ON users (whatsapp_phone) WHERE whatsapp_phone IS NOT NULL`);
 })();
 
 const ensureShopTables = (async () => {
@@ -181,6 +186,27 @@ const ensureShopTables = (async () => {
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now()
   )`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS platform_integrations (
+    id integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    whatsapp_phone_number_id text NOT NULL DEFAULT '',
+    whatsapp_access_token_encrypted text,
+    whatsapp_app_secret_encrypted text,
+    whatsapp_verify_token_encrypted text,
+    whatsapp_order_request_template text NOT NULL DEFAULT '',
+    whatsapp_order_paid_template text NOT NULL DEFAULT '',
+    whatsapp_order_receipt_template text NOT NULL DEFAULT '',
+    whatsapp_tracking_template text NOT NULL DEFAULT '',
+    whatsapp_pickup_template text NOT NULL DEFAULT '',
+    whatsapp_template_language text NOT NULL DEFAULT 'en_ZA',
+    courier_access_key_encrypted text,
+    courier_secret_encrypted text,
+    updated_at timestamp NOT NULL DEFAULT now()
+  )`);
+  await db.execute(sql`INSERT INTO platform_integrations (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS whatsapp_webhook_events (
+    message_id text PRIMARY KEY,
+    created_at timestamp NOT NULL DEFAULT now()
+  )`);
 })();
 
 const ensureProjectInventoryColumns = (async () => {
@@ -213,6 +239,10 @@ export class DatabaseStorage implements IStorage {
   async getUserByEmail(email: string): Promise<User | undefined> {
     await ensureAuthTables;
     return (await db.select().from(users).where(eq(users.email, email)).limit(1))[0];
+  }
+  async getUserByWhatsAppPhone(phone: string): Promise<User | undefined> {
+    await ensureAuthTables;
+    return (await db.select().from(users).where(eq(users.whatsappPhone, phone)).limit(1))[0];
   }
   async listUsers(): Promise<User[]> {
     await ensureAuthTables;
@@ -480,6 +510,32 @@ export class DatabaseStorage implements IStorage {
       const shop = shopById.get(order.shopId);
       return shop && order.delivery.shipment ? [{ shop, order }] : [];
     });
+  }
+  async getPlatformIntegrations(): Promise<PlatformIntegrations> {
+    await ensureShopTables;
+    const config = (await db.select().from(platformIntegrations).where(eq(platformIntegrations.id, 1)).limit(1))[0];
+    if (!config) throw new Error("Platform integrations settings are missing from the database.");
+    return config;
+  }
+  async savePlatformIntegrations(data: Omit<PlatformIntegrations, "id" | "updatedAt">): Promise<PlatformIntegrations> {
+    await ensureShopTables;
+    const config = (await db.insert(platformIntegrations).values({ ...data, id: 1, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: platformIntegrations.id,
+        set: { ...data, updatedAt: new Date() },
+      }).returning())[0];
+    return config;
+  }
+  async claimWhatsAppWebhookMessage(messageId: string): Promise<boolean> {
+    await ensureShopTables;
+    const inserted = await db.insert(whatsappWebhookEvents).values({ messageId })
+      .onConflictDoNothing({ target: whatsappWebhookEvents.messageId })
+      .returning({ messageId: whatsappWebhookEvents.messageId });
+    return inserted.length > 0;
+  }
+  async releaseWhatsAppWebhookMessage(messageId: string): Promise<void> {
+    await ensureShopTables;
+    await db.delete(whatsappWebhookEvents).where(eq(whatsappWebhookEvents.messageId, messageId));
   }
 
   // Yarn methods

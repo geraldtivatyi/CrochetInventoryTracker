@@ -42,13 +42,6 @@ interface ShopSettings {
   senderName: string;
   senderEmail: string;
   senderPhone: string;
-  courierCredentialsConfigured: boolean;
-  whatsappPhoneNumberId: string;
-  whatsappConfigured: boolean;
-  whatsappOrderTemplate: string;
-  whatsappTrackingTemplate: string;
-  whatsappReminderTemplate: string;
-  whatsappTemplateLanguage: string;
 }
 
 interface Product {
@@ -113,13 +106,6 @@ const emptyShop = (email: string): ShopSettings => ({
   senderName: "",
   senderEmail: email,
   senderPhone: "",
-  courierCredentialsConfigured: false,
-  whatsappPhoneNumberId: "",
-  whatsappConfigured: false,
-  whatsappOrderTemplate: "",
-  whatsappTrackingTemplate: "",
-  whatsappReminderTemplate: "",
-  whatsappTemplateLanguage: "en_ZA",
 });
 
 function ShopSettingsPanel() {
@@ -127,11 +113,6 @@ function ShopSettingsPanel() {
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery<ShopSettings | null>({ queryKey: ["/api/shop"] });
   const [form, setForm] = useState<ShopSettings>(() => emptyShop(user?.email ?? ""));
-  const [accessKey, setAccessKey] = useState("");
-  const [secretKey, setSecretKey] = useState("");
-  const [clearCredentials, setClearCredentials] = useState(false);
-  const [whatsappAccessToken, setWhatsappAccessToken] = useState("");
-  const [clearWhatsAppCredentials, setClearWhatsAppCredentials] = useState(false);
   const [brandingImage, setBrandingImage] = useState<{ data: string; mimeType: string } | null>(null);
   const [removeBrandingImage, setRemoveBrandingImage] = useState(false);
   const [brandingPreview, setBrandingPreview] = useState("");
@@ -190,20 +171,10 @@ function ShopSettingsPanel() {
       const payload = {
         ...form,
         customDomain: form.customDomain?.trim() || null,
-        courierAccessKey: accessKey || undefined,
-        courierSecret: secretKey || undefined,
-        clearCourierCredentials: clearCredentials,
-        whatsappAccessToken: whatsappAccessToken || undefined,
-        clearWhatsAppCredentials,
         brandingImage: brandingImage ?? undefined,
         removeBrandingImage: removeBrandingImage || undefined,
       };
       await apiRequest("PUT", "/api/shop", payload);
-      setAccessKey("");
-      setSecretKey("");
-      setClearCredentials(false);
-      setWhatsappAccessToken("");
-      setClearWhatsAppCredentials(false);
       setBrandingImage(null);
       setRemoveBrandingImage(false);
       setSaved("Shop settings saved.");
@@ -378,103 +349,6 @@ function ShopSettingsPanel() {
               ))}
             </div>
           </section>
-
-          <section className="space-y-3 rounded-md border border-neutral-200 p-4">
-            <div>
-              <h3 className="font-medium">Courier Guy API credentials</h3>
-              <p className="text-sm text-neutral-500">
-                Use the API access key and secret from your Courier Guy account. Values are encrypted before storage and never shown again.
-              </p>
-              <p className="mt-1 text-sm">
-                Status: <span className={form.courierCredentialsConfigured ? "font-medium text-green-700" : "text-neutral-500"}>
-                  {form.courierCredentialsConfigured && !clearCredentials ? "Credentials saved" : "Not configured"}
-                </span>
-              </p>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="courier-access">API access key</Label>
-                <Input id="courier-access" autoComplete="off" value={accessKey} onChange={(e) => setAccessKey(e.target.value)} placeholder={form.courierCredentialsConfigured ? "Saved; leave blank to keep" : ""} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="courier-secret">API secret key</Label>
-                <Input id="courier-secret" type="password" autoComplete="new-password" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder={form.courierCredentialsConfigured ? "Saved; leave blank to keep" : ""} />
-              </div>
-            </div>
-            {form.courierCredentialsConfigured && (
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={clearCredentials} onChange={(e) => setClearCredentials(e.target.checked)} />
-                Remove saved credentials
-              </label>
-            )}
-            <p className="text-xs text-neutral-500">The server must have COURIERGUY_ENCRYPTION_KEY configured to save credentials.</p>
-          </section>
-
-          {/* <section className="space-y-4 rounded-md border border-neutral-200 p-4">
-            <div>
-              <h3 className="font-medium text-lg">WhatsApp order updates</h3>
-              <p className="text-sm text-neutral-500">
-                Connect this shop's WhatsApp Business Cloud API number. The access token is encrypted at rest.
-                Customer updates are sent only when the buyer opts in at checkout; owner pickup reminders go to the sender phone above.
-              </p>
-              <p className="mt-1 text-sm">
-                Status: <span className={form.whatsappConfigured && !clearWhatsAppCredentials ? "font-medium text-green-700" : "text-neutral-500"}>
-                  {form.whatsappConfigured && !clearWhatsAppCredentials ? "Connected" : "Not configured"}
-                </span>
-              </p>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="whatsapp-phone-number-id">Meta phone number ID</Label>
-                <Input
-                  id="whatsapp-phone-number-id"
-                  value={clearWhatsAppCredentials ? "" : form.whatsappPhoneNumberId}
-                  onChange={(event) => update("whatsappPhoneNumberId", event.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="whatsapp-access-token">Permanent/system-user access token</Label>
-                <Input
-                  id="whatsapp-access-token"
-                  type="password"
-                  autoComplete="new-password"
-                  value={whatsappAccessToken}
-                  onChange={(event) => setWhatsappAccessToken(event.target.value)}
-                  placeholder={form.whatsappConfigured ? "Saved; leave blank to keep" : ""}
-                />
-              </div>
-              {([
-                ["whatsappOrderTemplate", "Order confirmation template"],
-                ["whatsappTrackingTemplate", "Tracking update template"],
-                ["whatsappReminderTemplate", "Pickup reminder template"],
-              ] as const).map(([key, label]) => (
-                <div key={key} className="space-y-2">
-                  <Label htmlFor={key}>{label} name</Label>
-                  <Input id={key} value={form[key]} onChange={(event) => update(key, event.target.value)} placeholder="approved_template_name" />
-                </div>
-              ))}
-              <div className="space-y-2">
-                <Label htmlFor="whatsapp-template-language">Template language code</Label>
-                <Input id="whatsapp-template-language" value={form.whatsappTemplateLanguage} onChange={(event) => update("whatsappTemplateLanguage", event.target.value)} placeholder="en_ZA" />
-              </div>
-            </div>
-            <p className="text-xs text-neutral-500">
-              Create and get Meta approval for templates in each connected WhatsApp Business account. Body placeholders, in order:
-              order confirmation (shop, order, items, total, delivery); tracking update (order, status, estimated delivery, latest scan);
-              pickup reminder (shop, order, pickup window, items, preparation instruction).
-            </p>
-            {form.whatsappConfigured && (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={clearWhatsAppCredentials}
-                  onChange={(event) => setClearWhatsAppCredentials(event.target.checked)}
-                />
-                Remove saved WhatsApp credentials
-              </label>
-            )}
-          </section> */}
 
           {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
           {saved && <p role="status" className="text-sm text-green-700">{saved}</p>}

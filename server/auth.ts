@@ -120,6 +120,7 @@ const toPublic = (u: User): PublicUser => ({
   otpEnabled: u.otpEnabled,
   isOwner: u.isOwner,
   defaultHourlyRate: u.defaultHourlyRate,
+  whatsappPhone: u.whatsappPhone,
 });
 
 function logIn(req: Request, user: User): Promise<void> {

@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 
 export default function Header() {
   const [location] = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   
   const navItems = [
     { path: "/", label: "Dashboard", icon: "ri-dashboard-line" },
@@ -14,9 +14,9 @@ export default function Header() {
     // { path: "/about", label: "About", icon: "ri-information-line" },
     // { path: "contact", label: "Contact", icon: "ri-mail-line" },
     { path: "/settings", label: "Settings", icon: "ri-settings-3-line" },
-    { path: "admin", label: "Admin", icon: "ri-admin-line" },
     { path: "/profile", label: "Profile", icon: "ri-user-line" },
   ];
+  if (user?.isOwner) navItems.push({ path: "/admin", label: "Admin", icon: "ri-admin-line" });
   
   return (
     <header className="bg-white shadow">

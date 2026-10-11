@@ -1,5 +1,5 @@
-import type { NotificationJob, Shop, ShopOrder } from "@shared/schema";
-import { decryptShopSecret } from "./shop-secrets";
+import type { NotificationJob, PlatformIntegrations, Shop, ShopOrder } from "@shared/schema";
+import { decryptShopCredential, decryptShopSecret } from "./shop-secrets";
 import { getShipmentTracking, type CourierCredentials } from "./courier-guy";
 import { sendMail } from "./mailer";
 import { storage } from "./storage";
@@ -69,8 +69,8 @@ function orderReceiptText(shop: Shop, order: ShopOrder) {
   ].join("\n");
 }
 
-function waSettingsReady(shop: Shop) {
-  return !!shop.whatsappPhoneNumberId && !!shop.whatsappAccessTokenEncrypted;
+function waSettingsReady(settings: PlatformIntegrations) {
+  return !!settings.whatsappPhoneNumberId && !!settings.whatsappAccessTokenEncrypted;
 }
 
 async function enqueue(
@@ -104,7 +104,8 @@ export async function enqueuePaidOrderNotifications(shop: Shop, order: ShopOrder
     subject: `Payment received · ${shop.name} · ${order.reference}`,
     text,
   }, new Date(), "paid-receipt");
-  if (order.customer.whatsappUpdates) {
+  const integrations = await storage.getPlatformIntegrations();
+  if (order.customer.whatsappUpdates && waSettingsReady(integrations) && integrations.whatsappOrderReceiptTemplate) {
     await enqueue(shop, order, "whatsapp", "order_receipt", order.customer.phone, {
       parameters: [
         shop.name,
@@ -143,6 +144,12 @@ export async function enqueueManualOrderRequestNotifications(shop: Shop, order: 
     subject: `Order request received · ${shop.name} · ${order.reference}`,
     text: buyerText,
   }, new Date(), "manual-request-buyer");
+  const integrations = await storage.getPlatformIntegrations();
+  if (order.customer.whatsappUpdates && waSettingsReady(integrations) && integrations.whatsappOrderRequestTemplate) {
+    await enqueue(shop, order, "whatsapp", "order_request", order.customer.phone, {
+      parameters: [shop.name, order.reference, items || "Your order", money(order.amountKobo), delivery],
+    }, new Date(), "manual-request-whatsapp");
+  }
 
   if (shop.senderEmail) {
     await enqueue(shop, order, "email", "order_request", shop.senderEmail, {
@@ -175,6 +182,12 @@ export async function enqueueManualOrderResolutionNotification(
       ? `The shop has marked payment as received for order ${order.reference}. Contact ${shop.name} directly with any questions about collection or delivery.`
       : `The shop has cancelled order request ${order.reference}. If you have questions, reply to the shop directly.`,
   }, new Date(), `manual-${status}-buyer`);
+  const integrations = await storage.getPlatformIntegrations();
+  if (order.customer.whatsappUpdates && waSettingsReady(integrations) && integrations.whatsappOrderPaidTemplate) {
+    await enqueue(shop, order, "whatsapp", "order_update", order.customer.phone, {
+      parameters: [shop.name, order.reference, paid ? "Payment confirmed by the shop" : "Order request cancelled"],
+    }, new Date(), `manual-${status}-whatsapp`);
+  }
 }
 
 function pickupDateTime(date: string, time: string) {
@@ -206,10 +219,12 @@ export async function enqueuePickupReminders(shop: Shop, order: ShopOrder) {
         text: emailText,
       }, runAt, `pickup-${label}-email`);
     }
-    if (shop.senderPhone && waSettingsReady(shop)) {
+    const integrations = await storage.getPlatformIntegrations();
+    const owner = await storage.getUserById(shop.userId);
+    if (owner?.whatsappPhone && waSettingsReady(integrations) && integrations.whatsappPickupTemplate) {
       let recipient: string;
       try {
-        recipient = normalizeWhatsAppNumber(shop.senderPhone);
+        recipient = normalizeWhatsAppNumber(owner.whatsappPhone);
       } catch (error) {
         console.error(`WhatsApp pickup reminder not queued for ${order.reference}:`, error);
         continue;
@@ -286,6 +301,8 @@ function trackingSummary(response: unknown) {
 
 async function enqueueTrackingUpdate(shop: Shop, order: ShopOrder, status: string, latestEvent: string, eta: string) {
   if (!order.customer.whatsappUpdates) return;
+  const integrations = await storage.getPlatformIntegrations();
+  if (!waSettingsReady(integrations) || !integrations.whatsappTrackingTemplate) return;
   await enqueue(shop, order, "whatsapp", "tracking_update", order.customer.phone, {
     parameters: [
       order.reference,
@@ -301,18 +318,20 @@ async function processTrackingUpdates() {
   processingTracking = true;
   try {
     const entries = await storage.listOrdersForTracking();
+    const integrations = await storage.getPlatformIntegrations();
+    if (!integrations.courierAccessKeyEncrypted || !integrations.courierSecretEncrypted) return;
+    const credentials: CourierCredentials = {
+      accessKey: decryptShopCredential(integrations.courierAccessKeyEncrypted),
+      secretKey: decryptShopCredential(integrations.courierSecretEncrypted),
+    };
     const now = Date.now();
     for (const { shop, order } of entries) {
       const delivery = order.delivery;
       if (delivery.tracking?.lastCheckedAt && now - Date.parse(delivery.tracking.lastCheckedAt) < 30 * 60 * 1000) continue;
       if (/delivered|cancelled|returned|failed/i.test(delivery.tracking?.status ?? "")) continue;
       const reference = delivery.trackingReference ?? extractShipmentTrackingReference(delivery.shipment);
-      if (!reference || !shop.courierAccessKeyEncrypted || !shop.courierSecretEncrypted) continue;
+      if (!reference) continue;
       try {
-        const credentials: CourierCredentials = {
-          accessKey: decryptShopSecret(shop.courierAccessKeyEncrypted),
-          secretKey: decryptShopSecret(shop.courierSecretEncrypted),
-        };
         const response = await getShipmentTracking(credentials, reference);
         const summary = trackingSummary(response);
         const previous = delivery.tracking;
@@ -353,12 +372,13 @@ async function processTrackingUpdates() {
   }
 }
 
-function templateFor(shop: Shop, kind: NotificationKind) {
+function templateFor(settings: PlatformIntegrations, kind: NotificationKind) {
   switch (kind) {
-    case "order_receipt": return shop.whatsappOrderTemplate;
-    case "order_request": return undefined;
-    case "tracking_update": return shop.whatsappTrackingTemplate;
-    case "pickup_reminder": return shop.whatsappReminderTemplate;
+    case "order_receipt": return settings.whatsappOrderReceiptTemplate;
+    case "order_request": return settings.whatsappOrderRequestTemplate;
+    case "order_update": return settings.whatsappOrderPaidTemplate;
+    case "tracking_update": return settings.whatsappTrackingTemplate;
+    case "pickup_reminder": return settings.whatsappPickupTemplate;
   }
 }
 
@@ -370,20 +390,20 @@ async function deliver(job: NotificationJob) {
     await sendMail({ to: job.recipient, subject, text });
     return;
   }
-  const shop = await storage.getShopById(job.shopId);
-  if (!shop || !waSettingsReady(shop)) throw new Error("Configure this shop's WhatsApp Cloud API credentials before sending messages.");
-  const templateName = templateFor(shop, job.kind);
-  if (!templateName) throw new Error(`Set an approved WhatsApp template for ${job.kind.replaceAll("_", " ")} in Shop settings.`);
+  const settings = await storage.getPlatformIntegrations();
+  if (!waSettingsReady(settings)) throw new Error("Configure the shared WhatsApp Cloud API credentials in Admin settings before sending messages.");
+  const templateName = templateFor(settings, job.kind);
+  if (!templateName) throw new Error(`Set the approved shared WhatsApp template for ${job.kind.replaceAll("_", " ")} in Admin settings.`);
   const parameters = job.payload.parameters;
   if (!Array.isArray(parameters) || parameters.some((value) => typeof value !== "string")) {
     throw new Error("The queued WhatsApp template parameters are invalid.");
   }
   await sendWhatsAppTemplate(
-    decryptShopSecret(shop.whatsappAccessTokenEncrypted!),
-    shop.whatsappPhoneNumberId!,
+    decryptShopSecret(settings.whatsappAccessTokenEncrypted!),
+    settings.whatsappPhoneNumberId,
     job.recipient,
     templateName,
-    shop.whatsappTemplateLanguage,
+    settings.whatsappTemplateLanguage,
     parameters,
   );
 }

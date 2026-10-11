@@ -15,6 +15,7 @@ import Calculator from "@/pages/calculator";
 import Shop from "@/pages/shop";
 import NotFound from "@/pages/not-found";
 import Settings from "@/pages/settings";
+import Admin from "@/pages/admin";
 import Login from "@/pages/login";
 import ForgotPassword from "@/pages/forgot-password";
 import ResetPassword from "@/pages/reset-password";
@@ -68,6 +69,7 @@ function Router() {
         <Route path="/calculator" component={Calculator} />
         <Route path="/shop" component={Shop} />
         <Route path="/settings" component={Settings} />
+        <Route path="/admin" component={user.isOwner ? Admin : NotFound} />
 
         <Route component={NotFound} />
       </Switch>

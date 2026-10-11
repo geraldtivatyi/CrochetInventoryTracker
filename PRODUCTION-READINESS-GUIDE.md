@@ -86,7 +86,7 @@ Notes:
 - The Compose database still uses simple development credentials in its service configuration. Do **not** expose this setup as-is to the public internet. Prefer managed PostgreSQL; otherwise change the database credentials and app connection string together, keep the database on a private network, and apply a firewall.
 - `DATABASE_URL` is supplied by the app's Compose configuration for its internal database service. For a managed database, configure the host's `DATABASE_URL`/`NEON_DATABASE_URL` and TLS settings instead.
 - `SMTP_HOST` can be left unset while developing; in production a missing SMTP configuration means queued emails fail and retry rather than being delivered.
-- No Courier Guy or WhatsApp provider account token belongs in this root `.env`; those are configured per shop in **Shop setup**.
+- Courier Guy and WhatsApp credentials are configured centrally by the platform admin in **Admin**. Keep only the encryption keys in the root `.env`; do not put provider account tokens there.
 
 After setting deployment environment values and confirming your database choice, the Compose-based staging deployment can be rebuilt with:
 
@@ -149,53 +149,37 @@ The test integration charges ZAR using integer minor units and sends customers t
 The project's [Courier Guy integration notes](./CourierGuyAPI.md) and supplied [`tcg.postman_collection.json`](./tcg.postman_collection.json) are the implementation references. Courier Guy's actual API permissions, rate availability and account setup must be confirmed with Courier Guy.
 
 1. Contact Courier Guy and arrange the account/merchant onboarding needed for API access, address delivery and locker/pickup-point delivery. Ask specifically for the production Accounts API access key and secret and the expected API region/settings.
-2. Keep those provider credentials private. Sign in to CrochetNook as the relevant shop owner; open **Shop setup**; enter the Courier Guy access key and secret there. They are encrypted in the database using `COURIERGUY_ENCRYPTION_KEY`.
+2. Keep those provider credentials private. Sign in as the platform administrator, open **Admin → Shared integrations**, and enter the Courier Guy access key and secret. They are encrypted in the database using `COURIERGUY_ENCRYPTION_KEY`.
 3. Fill in the shop's collection/origin address, contact name, sender email and phone. Enable the appropriate Courier Guy address and/or locker fulfilment option. Save the settings.
 4. For every published item that may be shipped, maintain realistic packaged length, width, height and weight. The app uses these product-level values to request a rate and builds a parcel per item unit. Validate the final packed parcel sizes/weight and any combined-order limits against Courier Guy's rules.
-5. Test buyer checkout from the public storefront using Courier Guy address delivery and locker delivery separately. Verify pickup-point search, rates, the selected service, the paid order's saved address/locker, and total amount against Courier Guy and Paystack.
+5. In manual mode, test address delivery and locker selection from the public storefront. These are saved as preferences only; no rate request or payment is made. If validating the Paystack test-only flow, separately verify pickup-point search, rates, the selected service, the paid order's saved address/locker, and total amount against Courier Guy and Paystack.
 6. Use a Courier Guy test/sandbox account or an approved low-risk test process to create a shipment **only for a paid order**. The shop owner chooses a future collection date and time window at booking; verify that Courier Guy accepts the window and that the resulting response includes a tracking reference.
 7. Check the app's order page for the shipment reference and poll result. Compare Courier Guy's raw account tracking page/API response with the status/ETA displayed by the app. Tracking field names and ETA availability need verification against your actual account; there is no documented webhook in the supplied collection, so the app polls about every 30 minutes.
 8. Test a real delivered/terminal status before relying on automatic tracking updates. Customers receive an update only if they consented to WhatsApp at checkout.
 
 Shipment creation is a seller action after payment; checkout does not book a courier automatically. For locker orders, the shipment destination is the selected locker, and owner reminders tell the seller to prepare that parcel. Confirm how Courier Guy expects locker drop-off/collection and service-level selection for your account.
 
-## 6. Set up WhatsApp Cloud API for each shop
+## 6. Set up the shared WhatsApp Cloud API integration
 
 Official starting point: [Meta WhatsApp Cloud API Get Started](https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started/). Meta's dashboard and current documentation are authoritative; UI and permissions can change.
 
-1. The shop owner creates/uses a Meta business portfolio, creates a Meta developer app with the WhatsApp use case, and connects the correct WhatsApp Business Account and sending phone number.
+1. The platform administrator creates/uses a Meta business portfolio and developer app with the WhatsApp use case, and connects the WhatsApp Business Account and shared sending phone number.
 2. Complete Meta business verification, phone-number registration, display-name checks, and any app review/permissions that Meta requires for the intended production setup. Do not rely on the temporary test token for production.
 3. Create a long-lived/system-user access token with the current WhatsApp messaging permission required by Meta. Protect it like a password.
-4. Create and submit three WhatsApp message templates for approval in the correct business account and language. The current code sends **body text parameters only** and expects:
+4. Create and submit the templates needed for the flows you will enable. Configure the approved names and language in **Admin → Shared integrations**. Current parameters are:
+   - Manual order request (5): shop, reference, item summary, product subtotal, fulfilment preference.
+   - Manual order status update (3): shop, reference, status.
+   - Paystack test receipt (5): shop, reference, item summary, total, delivery.
+   - Courier tracking update (4): order reference, shipment status, estimated delivery (or “Not provided by Courier Guy yet”), latest courier scan/event.
+   - Courier pickup reminder (5): shop, order reference, South African pickup date/time window, item summary, preparation instruction.
+   Templates must be approved in the connected WhatsApp Business Account and language. Keep them transactional and consistent with buyer consent and WhatsApp policy.
+5. In **Admin → Shared integrations**, enter the Meta phone number ID, long-lived access token, Meta app secret, webhook verify token and approved template names/language. Save. Secret values are encrypted in the database and are not returned to the browser.
+6. Configure the callback URL shown on the Admin page in Meta and subscribe to the `messages` webhook field. Meta verifies the webhook using the configured verify token; incoming webhook POST requests are checked with the app-secret signature.
+7. In **Admin → Owner WhatsApp numbers**, assign a unique international-format WhatsApp number to each shop account that should receive the owner menu. South African local numbers beginning with `0` are converted to country code `27`. Unassigned numbers receive the customer menu.
+8. Submit a manual order request from a test storefront. Explicitly tick WhatsApp consent to test the buyer notification. From the mapped owner number, review pending requests, then test confirming a manually received payment and cancelling a request. Test customer reference lookup from the customer's saved phone number.
+9. For optional Paystack/Courier Guy test integrations, test receipt, pickup and tracking templates separately. Test bad/expired tokens, unapproved or wrong-language templates, bad recipient numbers and Meta rate/quality errors. Correct configuration and inspect server logs/notification records before launch.
 
-   **Order confirmation** — 5 placeholders, in this order:
-   1. shop name
-   2. order reference
-   3. item summary
-   4. total paid
-   5. delivery method/address or locker
-
-   **Tracking update** — 4 placeholders:
-   1. order reference
-   2. status
-   3. estimated delivery (or “Not provided by Courier Guy yet”)
-   4. latest courier scan/event
-
-   **Pickup reminder** — 5 placeholders:
-   1. shop name
-   2. order reference
-   3. pickup date/time window in South African time
-   4. item summary
-   5. preparation instruction
-
-   The template names and language code entered in **Shop setup** must match the exact approved template and language in Meta. Keep the templates transactional, accurate and consistent with buyer consent and WhatsApp policy.
-5. In the shop's **Shop setup → WhatsApp order updates**, enter the Meta phone number ID, long-lived access token, exact approved template names and template language (often `en_ZA` if that is how the template was approved). Save, then confirm the UI reports **Connected**. The token is not returned to the browser after saving.
-6. Confirm the shop sender phone is a valid WhatsApp recipient number in international format. South African local numbers beginning with `0` are converted to country code `27` by the app.
-7. Complete a low-risk Paystack test order and explicitly tick WhatsApp consent at checkout. Confirm the order template arrives at the buyer's opted-in number.
-8. Book a test Courier Guy shipment and verify the shop owner's configured WhatsApp number receives the 24-hour and 2-hour reminders, and that a changed tracking event reaches the opted-in buyer.
-9. Test bad/expired tokens, unapproved or wrong-language templates, a bad recipient number and Meta rate/quality errors. Correct configuration and inspect server logs/notification records before launch.
-
-Each shop uses its **own** phone number ID, token and approved templates. A configured number/token without approved matching templates will not send successfully. Buyer updates are opt-in; owner reminders are sent to the shop's configured sender phone only when WhatsApp API settings are configured.
+The platform uses one shared WhatsApp sending number, while owner identities are mapped to distinct incoming WhatsApp numbers. Buyer updates are opt-in; the bot only returns order details when the incoming number matches the customer's phone saved on that order. The owner menu can mark a manual payment received or cancel a pending request; owners must check their own payment records first.
 
 ## 7. Test the full order lifecycle
 

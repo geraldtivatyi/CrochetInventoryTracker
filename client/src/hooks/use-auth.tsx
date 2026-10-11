@@ -8,6 +8,7 @@ export interface AuthUser {
   otpEnabled: boolean;
   isOwner: boolean;
   defaultHourlyRate: number | null;
+  whatsappPhone: string | null;
 }
 
 interface MeResponse {

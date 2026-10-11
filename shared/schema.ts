@@ -110,6 +110,7 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   email: text("email").notNull().unique(),
   defaultHourlyRate: real("default_hourly_rate"),
+  whatsappPhone: text("whatsapp_phone").unique(),
   passwordHash: text("password_hash").notNull(),
   otpEnabled: boolean("otp_enabled").notNull().default(false),
   isOwner: boolean("is_owner").notNull().default(false),
@@ -119,7 +120,7 @@ export const users = pgTable("users", {
 });
 
 export type User = typeof users.$inferSelect;
-export type PublicUser = Pick<User, "id" | "email" | "otpEnabled" | "isOwner" | "defaultHourlyRate">;
+export type PublicUser = Pick<User, "id" | "email" | "otpEnabled" | "isOwner" | "defaultHourlyRate" | "whatsappPhone">;
 
 // One-time tokens: password resets and email OTP codes (only hashes are stored)
 export const authTokens = pgTable("auth_tokens", {
@@ -134,6 +135,30 @@ export const authTokens = pgTable("auth_tokens", {
 
 export type AuthToken = typeof authTokens.$inferSelect;
 export type TokenPurpose = "password_reset" | "login_otp" | "enable_otp";
+
+export const platformIntegrations = pgTable("platform_integrations", {
+  id: integer("id").primaryKey().default(1),
+  whatsappPhoneNumberId: text("whatsapp_phone_number_id").notNull().default(""),
+  whatsappAccessTokenEncrypted: text("whatsapp_access_token_encrypted"),
+  whatsappAppSecretEncrypted: text("whatsapp_app_secret_encrypted"),
+  whatsappVerifyTokenEncrypted: text("whatsapp_verify_token_encrypted"),
+  whatsappOrderRequestTemplate: text("whatsapp_order_request_template").notNull().default(""),
+  whatsappOrderPaidTemplate: text("whatsapp_order_paid_template").notNull().default(""),
+  whatsappOrderReceiptTemplate: text("whatsapp_order_receipt_template").notNull().default(""),
+  whatsappTrackingTemplate: text("whatsapp_tracking_template").notNull().default(""),
+  whatsappPickupTemplate: text("whatsapp_pickup_template").notNull().default(""),
+  whatsappTemplateLanguage: text("whatsapp_template_language").notNull().default("en_ZA"),
+  courierAccessKeyEncrypted: text("courier_access_key_encrypted"),
+  courierSecretEncrypted: text("courier_secret_encrypted"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export type PlatformIntegrations = typeof platformIntegrations.$inferSelect;
+
+export const whatsappWebhookEvents = pgTable("whatsapp_webhook_events", {
+  messageId: text("message_id").primaryKey(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 export const shopAddressSchema = z.object({
   type: z.enum(["business", "residential"]).default("business"),
@@ -277,7 +302,7 @@ export const notificationJobs = pgTable("notification_jobs", {
   shopId: integer("shop_id").notNull(),
   orderReference: text("order_reference").notNull(),
   channel: text("channel").$type<"email" | "whatsapp">().notNull(),
-  kind: text("kind").$type<"order_receipt" | "order_request" | "tracking_update" | "pickup_reminder">().notNull(),
+  kind: text("kind").$type<"order_receipt" | "order_request" | "order_update" | "tracking_update" | "pickup_reminder">().notNull(),
   recipient: text("recipient").notNull(),
   payload: jsonb("payload").$type<Record<string, string | string[]>>().notNull(),
   runAt: timestamp("run_at").notNull(),
@@ -402,6 +427,9 @@ export const checkoutQuoteSchema = z.object({
 }).superRefine((checkout, ctx) => {
   if (checkout.method === "courier" && !checkout.address) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter a delivery address", path: ["address"] });
+  }
+  if (checkout.method === "locker" && !checkout.pickupPoint) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Choose a pickup point", path: ["pickupPoint"] });
   }
 });
 
