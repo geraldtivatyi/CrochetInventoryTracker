@@ -58,7 +58,7 @@ function orderReceiptText(shop: Shop, order: ShopOrder) {
     items,
     "",
     `Delivery: ${deliveryDescription(order)}`,
-    `Delivery charge: ${money(order.delivery.feeKobo)}`,
+    `Delivery charge: ${order.delivery.feeKobo === null ? "To be confirmed" : money(order.delivery.feeKobo)}`,
     `Amount paid: ${money(order.amountKobo)} ${order.currency}`,
     "",
     order.delivery.method === "collection"
@@ -115,6 +115,66 @@ export async function enqueuePaidOrderNotifications(shop: Shop, order: ShopOrder
       ],
     }, new Date(), "paid-whatsapp");
   }
+}
+
+export async function enqueueManualOrderRequestNotifications(shop: Shop, order: ShopOrder) {
+  const items = itemDescription(order);
+  const delivery = order.delivery.method === "collection"
+    ? "Collection requested"
+    : order.delivery.method === "locker"
+      ? `Locker delivery requested: ${order.delivery.pickupPoint?.name ?? "preferred pickup location to be agreed"}`
+      : `Courier delivery requested to ${[
+          order.delivery.address?.street_address,
+          order.delivery.address?.local_area,
+          order.delivery.address?.city,
+          order.delivery.address?.zone,
+          order.delivery.address?.code,
+        ].filter(Boolean).join(", ")}`;
+  const buyerText = [
+    `Order request received · ${shop.name}`,
+    `Reference: ${order.reference}`,
+    `Items: ${items}`,
+    `Product subtotal: ${money(order.amountKobo)}`,
+    `Fulfilment: ${delivery}`,
+    "",
+    "No payment has been taken. The shop will contact you to confirm availability, any shipping cost, and how to pay.",
+  ].join("\n");
+  await enqueue(shop, order, "email", "order_request", order.customer.email, {
+    subject: `Order request received · ${shop.name} · ${order.reference}`,
+    text: buyerText,
+  }, new Date(), "manual-request-buyer");
+
+  if (shop.senderEmail) {
+    await enqueue(shop, order, "email", "order_request", shop.senderEmail, {
+      subject: `New order request · ${order.reference}`,
+      text: [
+        `A customer submitted an order request to ${shop.name}.`,
+        `Reference: ${order.reference}`,
+        `Customer: ${order.customer.name}`,
+        `Email: ${order.customer.email}`,
+        `Phone: ${order.customer.phone}`,
+        `Items: ${items}`,
+        `Product subtotal: ${money(order.amountKobo)}`,
+        `Fulfilment: ${delivery}`,
+        "",
+        "No payment or shipping charge has been collected. Contact the customer to confirm availability, payment, and shipping.",
+      ].join("\n"),
+    }, new Date(), "manual-request-owner");
+  }
+}
+
+export async function enqueueManualOrderResolutionNotification(
+  shop: Shop,
+  order: ShopOrder,
+  status: "paid" | "cancelled",
+) {
+  const paid = status === "paid";
+  await enqueue(shop, order, "email", "order_request", order.customer.email, {
+    subject: `${paid ? "Payment confirmed by shop" : "Order request cancelled"} · ${shop.name} · ${order.reference}`,
+    text: paid
+      ? `The shop has marked payment as received for order ${order.reference}. Contact ${shop.name} directly with any questions about collection or delivery.`
+      : `The shop has cancelled order request ${order.reference}. If you have questions, reply to the shop directly.`,
+  }, new Date(), `manual-${status}-buyer`);
 }
 
 function pickupDateTime(date: string, time: string) {
@@ -296,6 +356,7 @@ async function processTrackingUpdates() {
 function templateFor(shop: Shop, kind: NotificationKind) {
   switch (kind) {
     case "order_receipt": return shop.whatsappOrderTemplate;
+    case "order_request": return undefined;
     case "tracking_update": return shop.whatsappTrackingTemplate;
     case "pickup_reminder": return shop.whatsappReminderTemplate;
   }

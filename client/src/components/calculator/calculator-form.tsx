@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatCurrency } from "@/lib/utils";
+import { useAuth, errorMessage } from "@/hooks/use-auth";
 
 import {
   Form,
@@ -28,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 // Extend the schema with additional validation
 const calculatorFormSchema = insertPriceCalculationSchema.extend({
@@ -48,7 +50,12 @@ type CalculatorFormProps = {
 export default function CalculatorForm({ initialProject, onCalculate }: CalculatorFormProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user, isLoading: authLoading, setUser } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [ratePromptOpen, setRatePromptOpen] = useState(false);
+  const [rateDraft, setRateDraft] = useState("");
+  const [isSavingRate, setIsSavingRate] = useState(false);
+  const [rateError, setRateError] = useState("");
   
   // Fetch projects for the dropdown
   const { data: projects = [], isLoading: projectsLoading, isError: projectsError } = useQuery<Project[]>({
@@ -75,6 +82,45 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
       roundToNearest: false
     },
   });
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    if (user.defaultHourlyRate === null) {
+      setRateDraft("");
+      setRatePromptOpen(true);
+      return;
+    }
+    setRatePromptOpen(false);
+    if (form.getValues("hourlyRate") < 1) {
+      form.setValue("hourlyRate", user.defaultHourlyRate);
+    }
+  }, [authLoading, user, form]);
+
+  const saveDefaultHourlyRate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const rate = Number(rateDraft);
+    if (!Number.isFinite(rate) || rate < 1 || rate > 10000) {
+      setRateError("Enter an hourly rate between R1 and R10,000.");
+      return;
+    }
+    setIsSavingRate(true);
+    setRateError("");
+    try {
+      const response = await apiRequest("PATCH", "/api/auth/me/default-hourly-rate", {
+        defaultHourlyRate: rate,
+      });
+      const result: { user: typeof user } = await response.json();
+      if (!result.user) throw new Error("The saved hourly rate could not be loaded.");
+      setUser(result.user);
+      form.setValue("hourlyRate", rate, { shouldValidate: true });
+      setRatePromptOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+    } catch (error) {
+      setRateError(errorMessage(error));
+    } finally {
+      setIsSavingRate(false);
+    }
+  };
   
   // If an initial project was provided, load that project's data
   useEffect(() => {
@@ -162,6 +208,51 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
 
   
   return (
+    <>
+    <Dialog
+      open={ratePromptOpen}
+      onOpenChange={(open) => {
+        if (user?.defaultHourlyRate !== null && user?.defaultHourlyRate !== undefined) {
+          setRatePromptOpen(open);
+        }
+      }}
+    >
+      <DialogContent
+        onEscapeKeyDown={(event) => {
+          if (user?.defaultHourlyRate == null) event.preventDefault();
+        }}
+        onPointerDownOutside={(event) => {
+          if (user?.defaultHourlyRate == null) event.preventDefault();
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Set your default hourly rate</DialogTitle>
+          <DialogDescription>
+            We’ll use this rate to prefill the calculator. You can still adjust it for each calculation.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={saveDefaultHourlyRate} className="space-y-4">
+          <label htmlFor="default-hourly-rate" className="block text-sm font-medium">Hourly rate (ZAR)</label>
+          <Input
+            id="default-hourly-rate"
+            type="number"
+            min="1"
+            max="10000"
+            step="0.01"
+            value={rateDraft}
+            onChange={(event) => setRateDraft(event.target.value)}
+            autoFocus
+            required
+          />
+          {rateError && <p role="alert" className="text-sm text-red-600">{rateError}</p>}
+          <div className="flex justify-end">
+            <Button type="submit" disabled={isSavingRate}>
+              {isSavingRate ? "Saving…" : "Save default rate"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">
         {(projectsLoading || yarnsLoading) && (
@@ -338,7 +429,7 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
               name="hourlyRate"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel htmlFor="calc-rate">Hourly Rate</FormLabel>
+                  <FormLabel htmlFor="calc-rate">Hourly Rate (ZAR)</FormLabel>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
                       <span className="text-neutral-500">R</span>
@@ -420,5 +511,6 @@ export default function CalculatorForm({ initialProject, onCalculate }: Calculat
         </div>
       </form>
     </Form>
+    </>
   );
 }

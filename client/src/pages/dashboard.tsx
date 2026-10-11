@@ -7,6 +7,7 @@ import { ActivityLog, Yarn } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { formatCurrency } from "@/lib/utils";
+import type { ShopMetrics } from "@shared/shop-metrics";
 
 // Dashboard summary type from the API
 type DashboardSummary = {
@@ -16,6 +17,7 @@ type DashboardSummary = {
   totalProjects: number;
   averagePrice: number | null;
   pricingCalculationCount: number;
+  shopMetrics: ShopMetrics;
   recentActivities: ActivityLog[];
   lowStockYarns: Yarn[];
 };
@@ -93,7 +95,7 @@ export default function Dashboard() {
           icon="ri-archive-line"
           iconColor="text-primary-500"
           footer={{
-            text: `${dashboard?.totalStockBalls || 0} balls currently in stock`,
+            text: `${dashboard?.totalStockBalls || 0} balls available`,
             color: "text-neutral-600"
           }}
         />
@@ -111,24 +113,35 @@ export default function Dashboard() {
         />
         
         <SummaryCard
-          title="Pricing estimates"
-          value={dashboard?.averagePrice === null || dashboard?.averagePrice === undefined
+          title="Shop profits"
+          value={dashboard?.shopMetrics.grossProfit === null || dashboard?.shopMetrics.grossProfit === undefined
             ? "—"
-            : formatCurrency(dashboard.averagePrice)}
-          subtext="Average calculated price"
-          icon="ri-price-tag-3-line"
+            : formatCurrency(dashboard.shopMetrics.grossProfit)}
+          subtext="Gross profit from paid shop orders"
+          icon="ri-money-dollar-circle-line"
           iconColor="text-primary-500"
           footer={{
-            text: dashboard?.pricingCalculationCount
-              ? `Based on ${dashboard.pricingCalculationCount} saved calculation${dashboard.pricingCalculationCount === 1 ? "" : "s"}`
-              : "No saved pricing calculations yet",
+            text: dashboard?.shopMetrics.ordersWithCostData
+              ? `Based on ${dashboard.shopMetrics.ordersWithCostData} paid order${dashboard.shopMetrics.ordersWithCostData === 1 ? "" : "s"} with product costs`
+              : "Add product costs to calculate shop profits",
             color: "text-neutral-600"
           }}
         />
       </div>
       
-      {/* Recent Activity */}
+      {/* Low Stock Alert */}
       <Card className="bg-white rounded-lg shadow mb-6">
+        <CardContent className="p-5">
+          <h3 className="font-medium text-neutral-700 mb-4">Low Stock Alert (5 balls or fewer)</h3>
+          <LowStockTable
+            yarns={dashboard?.lowStockYarns || []}
+            onRestock={handleRestock}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Recent Activity */}
+      <Card className="bg-white rounded-lg shadow">
         <CardContent className="p-5">
           <h3 className="font-medium text-neutral-700 mb-4">Recent Activity</h3>
           <div className="space-y-3">
@@ -140,17 +153,6 @@ export default function Dashboard() {
               <p className="text-neutral-500 py-4 text-center">No recent activity</p>
             )}
           </div>
-        </CardContent>
-      </Card>
-      
-      {/* Low Stock Alert */}
-      <Card className="bg-white rounded-lg shadow">
-        <CardContent className="p-5">
-          <h3 className="font-medium text-neutral-700 mb-4">Low Stock Alert (5 balls or fewer)</h3>
-          <LowStockTable 
-            yarns={dashboard?.lowStockYarns || []} 
-            onRestock={handleRestock} 
-          />
         </CardContent>
       </Card>
     </div>

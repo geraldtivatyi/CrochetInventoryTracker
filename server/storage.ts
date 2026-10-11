@@ -14,6 +14,7 @@ import {
   ShopOrder,
   NotificationJob,
   ShopProduct,
+  ProjectDetails,
 } from "@shared/schema";
 
 export type ShopRecord = Omit<Shop, "id" | "userId" | "createdAt" | "updatedAt">;
@@ -24,6 +25,9 @@ export type ShopProductRecord = Omit<
 export type ShopProductView = Omit<ShopProduct, "imageData">;
 export type ShopProductImage = { data: Buffer; mimeType: string };
 export type ShopBrandingImage = ShopProductImage;
+export type ProjectActionResult =
+  | { project: Project }
+  | { reason: "not_found" | "invalid_status" | "yarn_not_found" | "insufficient_stock" };
 
 function withoutProductImageData(product: ShopProduct): ShopProductView {
   const { imageData, ...view } = product;
@@ -41,7 +45,7 @@ export interface IStorage {
   deleteUser(id: number): Promise<void>;
   updateUser(
     id: number,
-    data: Partial<Pick<User, "passwordHash" | "otpEnabled" | "failedLoginAttempts" | "lockedUntil">>
+    data: Partial<Pick<User, "passwordHash" | "otpEnabled" | "failedLoginAttempts" | "lockedUntil" | "defaultHourlyRate">>
   ): Promise<void>;
   // Replaces any existing token with the same user and purpose
   saveToken(userId: number, purpose: TokenPurpose, tokenHash: string, expiresAt: Date): Promise<void>;
@@ -71,7 +75,12 @@ export interface IStorage {
   listShopOrders(shopId: number): Promise<ShopOrder[]>;
   updateShopOrder(
     reference: string,
-    data: Partial<Pick<ShopOrder, "status" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
+    data: Partial<Pick<ShopOrder, "status" | "paymentMethod" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
+  ): Promise<ShopOrder | undefined>;
+  resolveManualShopOrder(
+    shopId: number,
+    reference: string,
+    status: "paid" | "cancelled",
   ): Promise<ShopOrder | undefined>;
   enqueueNotification(job: Omit<NotificationJob, "id" | "createdAt" | "updatedAt">): Promise<void>;
   claimDueNotificationJobs(now: Date, limit: number): Promise<NotificationJob[]>;
@@ -92,8 +101,11 @@ export interface IStorage {
   // Project Methods
   getAllProjects(): Promise<Project[]>;
   getProject(id: number): Promise<Project | undefined>;
-  createProject(project: InsertProject): Promise<Project>;
-  updateProject(id: number, project: Partial<InsertProject>): Promise<Project | undefined>;
+  createProject(project: ProjectDetails): Promise<Project>;
+  updateProject(id: number, project: Partial<ProjectDetails>): Promise<Project | undefined>;
+  startProject(id: number): Promise<ProjectActionResult>;
+  completeProject(id: number, ballsUsed: number): Promise<ProjectActionResult>;
+  cancelProject(id: number): Promise<ProjectActionResult>;
   deleteProject(id: number): Promise<boolean>;
   
   // Price Calculation Methods
@@ -228,11 +240,20 @@ export class MemStorage implements IStorage {
   }
   async updateShopOrder(
     reference: string,
-    data: Partial<Pick<ShopOrder, "status" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
+    data: Partial<Pick<ShopOrder, "status" | "paymentMethod" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
   ) {
     const order = this.shopOrders.find((item) => item.reference === reference);
     if (!order) return undefined;
     Object.assign(order, data, { updatedAt: new Date() });
+    return order;
+  }
+  async resolveManualShopOrder(shopId: number, reference: string, status: "paid" | "cancelled") {
+    const order = this.shopOrders.find((item) =>
+      item.shopId === shopId && item.reference === reference &&
+      item.paymentMethod === "manual" && item.status === "pending",
+    );
+    if (!order) return undefined;
+    Object.assign(order, { status, updatedAt: new Date() });
     return order;
   }
   async enqueueNotification(data: Omit<NotificationJob, "id" | "createdAt" | "updatedAt">) {
@@ -292,6 +313,7 @@ export class MemStorage implements IStorage {
       email,
       passwordHash,
       otpEnabled: false,
+      defaultHourlyRate: null,
       isOwner,
       failedLoginAttempts: 0,
       lockedUntil: null,
@@ -349,14 +371,14 @@ export class MemStorage implements IStorage {
 
   async createYarn(yarn: InsertYarn): Promise<Yarn> {
     const id = this.yarnsCurrentId++;
-    const newYarn: Yarn = { ...yarn, id };
+    const newYarn: Yarn = { ...yarn, notes: yarn.notes ?? null, reservedQuantity: 0, id };
     this.yarns.set(id, newYarn);
     return newYarn;
   }
 
   async updateYarn(id: number, yarn: Partial<InsertYarn>): Promise<Yarn | undefined> {
     const existingYarn = this.yarns.get(id);
-    if (!existingYarn) return undefined;
+    if (!existingYarn || (yarn.quantityInStock !== undefined && yarn.quantityInStock < existingYarn.reservedQuantity)) return undefined;
 
     const updatedYarn = { ...existingYarn, ...yarn };
     this.yarns.set(id, updatedYarn);
@@ -364,11 +386,17 @@ export class MemStorage implements IStorage {
   }
 
   async deleteYarn(id: number): Promise<boolean> {
+    if (
+      (this.yarns.get(id)?.reservedQuantity ?? 0) > 0 ||
+      Array.from(this.projects.values()).some(
+        (project) => project.yarnId === id && (project.status === "pending" || project.status === "in_progress"),
+      )
+    ) return false;
     return this.yarns.delete(id);
   }
 
   async getLowStockYarns(threshold: number): Promise<Yarn[]> {
-    return Array.from(this.yarns.values()).filter(yarn => yarn.quantityInStock <= threshold);
+    return Array.from(this.yarns.values()).filter(yarn => yarn.quantityInStock - yarn.reservedQuantity <= threshold);
   }
 
   // Project methods
@@ -382,21 +410,88 @@ export class MemStorage implements IStorage {
 
   async createProject(project: InsertProject): Promise<Project> {
     const id = this.projectsCurrentId++;
-    const newProject: Project = { ...project, id };
+    const newProject: Project = {
+      ...project,
+      yarnId: project.yarnId ?? null,
+      status: "pending",
+      reservedBalls: 0,
+      ballsUsed: null,
+      id,
+    };
     this.projects.set(id, newProject);
     return newProject;
   }
 
   async updateProject(id: number, project: Partial<InsertProject>): Promise<Project | undefined> {
     const existingProject = this.projects.get(id);
-    if (!existingProject) return undefined;
+    if (!existingProject || existingProject.status !== "pending") return undefined;
 
     const updatedProject = { ...existingProject, ...project };
     this.projects.set(id, updatedProject);
     return updatedProject;
   }
 
+  async startProject(id: number): Promise<ProjectActionResult> {
+    const project = this.projects.get(id);
+    if (!project) return { reason: "not_found" };
+    if (project.status !== "pending") return { reason: "invalid_status" };
+    if (project.yarnId !== null) {
+      const yarn = this.yarns.get(project.yarnId);
+      if (!yarn) return { reason: "yarn_not_found" };
+      if (yarn.quantityInStock - yarn.reservedQuantity < project.ballsNeeded) return { reason: "insufficient_stock" };
+      this.yarns.set(yarn.id, { ...yarn, reservedQuantity: yarn.reservedQuantity + project.ballsNeeded });
+      project.reservedBalls = project.ballsNeeded;
+    }
+    project.status = "in_progress";
+    this.projects.set(id, project);
+    return { project };
+  }
+
+  async completeProject(id: number, ballsUsed: number): Promise<ProjectActionResult> {
+    const project = this.projects.get(id);
+    if (!project) return { reason: "not_found" };
+    if (project.status !== "in_progress") return { reason: "invalid_status" };
+    if (project.yarnId !== null) {
+      const yarn = this.yarns.get(project.yarnId);
+      if (!yarn) return { reason: "yarn_not_found" };
+      const additionalUse = Math.max(0, ballsUsed - project.reservedBalls);
+      if (yarn.quantityInStock - yarn.reservedQuantity < additionalUse) return { reason: "insufficient_stock" };
+      this.yarns.set(yarn.id, {
+        ...yarn,
+        quantityInStock: yarn.quantityInStock - ballsUsed,
+        reservedQuantity: yarn.reservedQuantity - project.reservedBalls,
+      });
+    }
+    project.status = "completed";
+    project.ballsUsed = ballsUsed;
+    project.reservedBalls = 0;
+    this.projects.set(id, project);
+    return { project };
+  }
+
+  async cancelProject(id: number): Promise<ProjectActionResult> {
+    const project = this.projects.get(id);
+    if (!project) return { reason: "not_found" };
+    if (project.status !== "pending" && project.status !== "in_progress") return { reason: "invalid_status" };
+    if (project.status === "in_progress" && project.yarnId !== null) {
+      const yarn = this.yarns.get(project.yarnId);
+      if (!yarn) return { reason: "yarn_not_found" };
+      this.yarns.set(yarn.id, { ...yarn, reservedQuantity: yarn.reservedQuantity - project.reservedBalls });
+      project.reservedBalls = 0;
+    }
+    project.status = "cancelled";
+    this.projects.set(id, project);
+    return { project };
+  }
+
   async deleteProject(id: number): Promise<boolean> {
+    const project = this.projects.get(id);
+    if (project?.status === "in_progress" && project.yarnId !== null && project.reservedBalls > 0) {
+      const yarn = this.yarns.get(project.yarnId);
+      if (yarn) {
+        this.yarns.set(yarn.id, { ...yarn, reservedQuantity: yarn.reservedQuantity - project.reservedBalls });
+      }
+    }
     return this.projects.delete(id);
   }
 
@@ -470,6 +565,9 @@ if (databaseUrl) {
   const { DatabaseStorage } = await import("./db");
   storageInstance = new DatabaseStorage();
 } else {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("A persistent PostgreSQL connection is required in production. Set DATABASE_URL or NEON_DATABASE_URL.");
+  }
   console.warn("No database URL found; using empty, non-persistent in-memory storage.");
   storageInstance = new MemStorage();
 }

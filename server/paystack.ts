@@ -15,16 +15,16 @@ function getTestSecret() {
   return secret;
 }
 
-export function createCheckoutQuoteToken(payload: unknown): string {
+export function createCheckoutQuoteToken(payload: unknown, signingSecret = getTestSecret()): string {
   const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = crypto.createHmac("sha256", getTestSecret()).update(encoded).digest("base64url");
+  const signature = crypto.createHmac("sha256", signingSecret).update(encoded).digest("base64url");
   return `${encoded}.${signature}`;
 }
 
-export function readCheckoutQuoteToken<T>(token: string): T {
+export function readCheckoutQuoteToken<T>(token: string, signingSecret = getTestSecret()): T {
   const [encoded, signature, extra] = token.split(".");
   if (!encoded || !signature || extra) throw new Error("Invalid or expired delivery quote. Please request a new quote.");
-  const expected = crypto.createHmac("sha256", getTestSecret()).update(encoded).digest();
+  const expected = crypto.createHmac("sha256", signingSecret).update(encoded).digest();
   const actual = Buffer.from(signature, "base64url");
   if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
     throw new Error("Invalid or expired delivery quote. Please request a new quote.");

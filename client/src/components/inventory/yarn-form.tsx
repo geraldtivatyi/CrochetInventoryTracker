@@ -78,7 +78,7 @@ export default function YarnForm({ yarn, onClose, onSuccess }: YarnFormProps) {
       console.error("Error saving yarn:", error);
       toast({
         title: "Error",
-        description: "There was a problem saving the yarn",
+        description: error instanceof Error ? error.message : "There was a problem saving the yarn",
         variant: "destructive",
       });
     } finally {

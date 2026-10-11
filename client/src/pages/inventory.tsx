@@ -28,7 +28,7 @@ export default function Inventory() {
     queryKey: ['/api/yarns'],
   });
 
-  const lowStockYarns = yarns.filter((yarn) => yarn.quantityInStock <= 5);
+  const lowStockYarns = yarns.filter((yarn) => yarn.quantityInStock - yarn.reservedQuantity <= 5);
 
   // Handle search input change
   const handleSearch = (e: ChangeEvent<HTMLInputElement>) => {
@@ -43,9 +43,9 @@ export default function Inventory() {
     const matchesColor = colorFilter === "all" || colorFilter === "" || yarn.color === colorFilter;
     
     const matchesStock = stockFilter === "all" || 
-                        (stockFilter === "low" && yarn.quantityInStock <= 5) ||
-                        (stockFilter === "out" && yarn.quantityInStock === 0) ||
-                        (stockFilter === "in" && yarn.quantityInStock > 5);
+                        (stockFilter === "low" && yarn.quantityInStock - yarn.reservedQuantity <= 5) ||
+                        (stockFilter === "out" && yarn.quantityInStock - yarn.reservedQuantity === 0) ||
+                        (stockFilter === "in" && yarn.quantityInStock - yarn.reservedQuantity > 5);
     
     return matchesSearch && matchesColor && matchesStock;
   }).sort((a, b) => {
@@ -57,9 +57,9 @@ export default function Inventory() {
       case "price-high":
         return b.costPerBall - a.costPerBall;
       case "stock-low":
-        return a.quantityInStock - b.quantityInStock;
+        return (a.quantityInStock - a.reservedQuantity) - (b.quantityInStock - b.reservedQuantity);
       case "stock-high":
-        return b.quantityInStock - a.quantityInStock;
+        return (b.quantityInStock - b.reservedQuantity) - (a.quantityInStock - a.reservedQuantity);
       default:
         return 0;
     }
@@ -86,8 +86,9 @@ export default function Inventory() {
   // Calculate inventory stats
   const totalValue = yarns.reduce((sum, yarn) => sum + (yarn.costPerBall * yarn.quantityInStock), 0);
   const totalYarns = yarns.length;
-  const totalBalls = yarns.reduce((sum, yarn) => sum + yarn.quantityInStock, 0);
-  const outOfStock = yarns.filter(yarn => yarn.quantityInStock === 0).length;
+  const totalBalls = yarns.reduce((sum, yarn) => sum + yarn.quantityInStock - yarn.reservedQuantity, 0);
+  const reservedBalls = yarns.reduce((sum, yarn) => sum + yarn.reservedQuantity, 0);
+  const outOfStock = yarns.filter(yarn => yarn.quantityInStock - yarn.reservedQuantity === 0).length;
 
   if (isLoading) {
     return <div className="p-8 text-center">Loading yarn inventory...</div>;
@@ -132,10 +133,11 @@ export default function Inventory() {
         
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-neutral-600">Total Balls</CardTitle>
+            <CardTitle className="text-sm font-medium text-neutral-600">Available Balls</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="text-2xl font-bold">{totalBalls}</div>
+            <p className="text-xs text-neutral-500">{reservedBalls} reserved for active projects</p>
           </CardContent>
         </Card>
         

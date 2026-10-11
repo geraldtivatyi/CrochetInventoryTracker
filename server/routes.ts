@@ -8,7 +8,7 @@ import { createShipment, getPickupPoints, getRates } from "./courier-guy";
 import { decryptShopCredential, encryptShopCredential, encryptShopSecret } from "./shop-secrets";
 import { 
   insertYarnSchema, 
-  insertProjectSchema, 
+  projectDetailsSchema,
   insertPriceCalculationSchema,
   insertActivityLogSchema,
   courierPickupQuerySchema,
@@ -35,10 +35,13 @@ import {
 } from "./paystack";
 import {
   enqueuePaidOrderNotifications,
+  enqueueManualOrderRequestNotifications,
+  enqueueManualOrderResolutionNotification,
   enqueuePickupReminders,
   extractShipmentTrackingReference,
   startNotificationWorkers,
 } from "./notifications";
+import { calculateShopMetrics } from "@shared/shop-metrics";
 
 const yarnUpdateRequestSchema = insertYarnSchema.partial().extend({
   adjustmentReason: z.string().trim().min(2).max(300).optional(),
@@ -60,6 +63,7 @@ async function publicShop(shop: NonNullable<Awaited<ReturnType<typeof storage.ge
     name: shop.name,
     description: shop.description,
     themeColor: shop.themeColor,
+    paymentMode: shopPaymentMode(),
     brandingImageUrl: await storage.getShopBrandingImage(shop.id) ? "/api/shop/branding-image" : "",
     isLive: shop.isLive,
     customDomain: shop.customDomain,
@@ -153,7 +157,26 @@ type CheckoutQuote = {
   customerDigest: string;
   delivery: ShopOrder["delivery"];
   rates: CheckoutRate[];
+  paymentMethod: "manual" | "paystack_test";
 };
+
+const developmentQuoteSecret = crypto.randomBytes(32).toString("hex");
+
+function shopPaymentMode(): "manual" | "paystack_test" {
+  const mode = process.env.SHOP_PAYMENT_MODE ?? "manual";
+  if (mode !== "manual" && mode !== "paystack_test") {
+    throw new Error("SHOP_PAYMENT_MODE must be either manual or paystack_test.");
+  }
+  if (mode === "paystack_test" && !isPaystackTestModeConfigured()) {
+    throw new Error("SHOP_PAYMENT_MODE=paystack_test requires a Paystack test secret key.");
+  }
+  return mode;
+}
+
+function quoteSigningSecret(paymentMethod: "manual" | "paystack_test") {
+  if (paymentMethod === "paystack_test") return undefined;
+  return process.env.SESSION_SECRET ?? developmentQuoteSecret;
+}
 
 function checkoutCustomerDigest(customer: { name: string; email: string; phone: string }) {
   return crypto.createHash("sha256")
@@ -266,6 +289,7 @@ function publicOrderStatus(order: ShopOrder) {
   return {
     reference: order.reference,
     status: order.status,
+    paymentMethod: order.paymentMethod,
     amountKobo: order.amountKobo,
     currency: order.currency,
     createdAt: order.createdAt,
@@ -306,7 +330,9 @@ function paystackWebhookRouter() {
         return res.json({ received: true });
       }
       const order = await storage.getShopOrderByReference(event.data.reference);
-      if (!order || order.status === "paid") return res.json({ received: true });
+      if (!order || order.paymentMethod !== "paystack_test" || order.status === "paid") {
+        return res.json({ received: true });
+      }
       const payment = await verifyPaystackTransaction(order.reference);
       if (
         payment.status === "success" &&
@@ -341,7 +367,8 @@ function storefrontRouter() {
         description: shop.description,
         themeColor: shop.themeColor,
         brandingImageUrl,
-        checkoutEnabled: isPaystackTestModeConfigured(),
+        checkoutEnabled: true,
+        paymentMode: shopPaymentMode(),
         collectionEnabled: shop.collectionEnabled,
         courierEnabled: shop.courierEnabled,
         lockersEnabled: shop.lockersEnabled,
@@ -377,9 +404,7 @@ function storefrontRouter() {
       const input = checkoutQuoteSchema.parse(req.body);
       const shop = await storage.getShopBySlug(req.params.slug, true);
       if (!shop) return res.status(404).json({ message: "Shop not found" });
-      if (!isPaystackTestModeConfigured()) {
-        return res.status(503).json({ message: "Online checkout is not configured. The shop owner must add a Paystack test secret key." });
-      }
+      const paymentMethod = shopPaymentMode();
       if (
         (input.method === "collection" && !shop.collectionEnabled) ||
         (input.method === "courier" && !shop.courierEnabled) ||
@@ -396,6 +421,9 @@ function storefrontRouter() {
           !input.address.code.trim())
       ) {
         return res.status(400).json({ message: "Complete the delivery street, suburb, city, province and postal code." });
+      }
+      if (paymentMethod === "paystack_test" && input.method === "locker" && !input.pickupPoint) {
+        return res.status(400).json({ message: "Choose a Courier Guy locker before requesting a test payment quote." });
       }
 
       const quantities = new Map<number, number>();
@@ -419,7 +447,7 @@ function storefrontRouter() {
       }
       const delivery: ShopOrder["delivery"] = {
         method: input.method,
-        feeKobo: 0,
+        feeKobo: paymentMethod === "manual" && input.method !== "collection" ? null : 0,
         ...(input.address ? { address: input.address } : {}),
         ...(input.pickupPoint ? { pickupPoint: input.pickupPoint } : {}),
       };
@@ -427,6 +455,8 @@ function storefrontRouter() {
       let rates: CheckoutRate[];
       if (input.method === "collection") {
         rates = [{ code: "collection", name: "Collection", amountKobo: 0 }];
+      } else if (paymentMethod === "manual") {
+        rates = [{ code: "manual", name: "Shipping cost to be confirmed by the shop", amountKobo: 0 }];
       } else {
         const parcels = checkoutParcels(items, products);
         delivery.parcels = parcels;
@@ -465,9 +495,10 @@ function storefrontRouter() {
         customerDigest: checkoutCustomerDigest(input.deliveryContact),
         delivery,
         rates,
+        paymentMethod,
       };
       return res.json({
-        quoteToken: createCheckoutQuoteToken(quote),
+        quoteToken: createCheckoutQuoteToken(quote, quoteSigningSecret(paymentMethod)),
         expiresAt: quote.expiresAt,
         subtotalKobo,
         rates: rates.map(({ code, name, amountKobo }) => ({ code, name, amountKobo })),
@@ -479,9 +510,13 @@ function storefrontRouter() {
     checkoutLimiter,
     asyncRoute(async (req, res) => {
       const input = checkoutPaymentSchema.parse(req.body);
-      const quote = readCheckoutQuoteToken<CheckoutQuote>(input.quoteToken);
+      const paymentMethod = shopPaymentMode();
+      const quote = readCheckoutQuoteToken<CheckoutQuote>(input.quoteToken, quoteSigningSecret(paymentMethod));
       if (quote.expiresAt < Date.now() || quote.slug !== req.params.slug) {
         return res.status(400).json({ message: "Your quote has expired. Please request a new one." });
+      }
+      if (quote.paymentMethod !== paymentMethod) {
+        return res.status(409).json({ message: "The shop's checkout mode changed. Please restart checkout." });
       }
       const customerDigest = checkoutCustomerDigest(input.customer);
       if (customerDigest !== quote.customerDigest) {
@@ -492,8 +527,15 @@ function storefrontRouter() {
       const reference = `CN_${quote.quoteId.replace(/-/g, "")}`;
       const existingOrder = await storage.getShopOrderByReference(reference);
       if (existingOrder) {
-        if (existingOrder.paystackAuthorizationUrl && existingOrder.status === "pending") {
+        if (existingOrder.paymentMethod === "paystack_test" && existingOrder.paystackAuthorizationUrl && existingOrder.status === "pending") {
           return res.json({ authorizationUrl: existingOrder.paystackAuthorizationUrl, reference });
+        }
+        if (existingOrder.paymentMethod === "manual" && existingOrder.status === "pending") {
+          await enqueueManualOrderRequestNotifications(
+            shop,
+            (await storage.getShopOrderByReference(reference)) ?? existingOrder,
+          );
+          return res.json({ reference, paymentMethod: "manual" });
         }
         return res.status(409).json({ message: "This checkout has already been submitted. Please start a new checkout." });
       }
@@ -505,7 +547,10 @@ function storefrontRouter() {
           return res.status(409).json({ message: "A product changed while you were checking out. Please request a new quote." });
         }
       }
-      const selectedRate = quote.rates.find((rate) => rate.code === (input.serviceLevelCode ?? "collection"));
+      const fallbackRateCode = paymentMethod === "manual"
+        ? quote.method === "collection" ? "collection" : "manual"
+        : "collection";
+      const selectedRate = quote.rates.find((rate) => rate.code === (input.serviceLevelCode ?? fallbackRateCode));
       if (!selectedRate) return res.status(400).json({ message: "Choose a valid delivery option from your quote." });
       if (
         (quote.method === "collection" && !shop.collectionEnabled) ||
@@ -516,14 +561,14 @@ function storefrontRouter() {
       }
       const delivery: ShopOrder["delivery"] = {
         ...quote.delivery,
-        feeKobo: selectedRate.amountKobo,
-        ...(quote.method !== "collection"
+        feeKobo: paymentMethod === "manual" && quote.method !== "collection" ? null : selectedRate.amountKobo,
+        ...(quote.method !== "collection" && paymentMethod === "paystack_test"
           ? { serviceLevelCode: selectedRate.code, serviceLevelName: selectedRate.name }
           : {}),
       };
       const amountKobo = quote.subtotalKobo + selectedRate.amountKobo;
-      if (!Number.isSafeInteger(amountKobo) || amountKobo < 100) {
-        return res.status(400).json({ message: "Paystack requires a payment of at least R1.00." });
+      if (!Number.isSafeInteger(amountKobo) || amountKobo <= 0 || (paymentMethod === "paystack_test" && amountKobo < 100)) {
+        return res.status(400).json({ message: paymentMethod === "paystack_test" ? "Paystack requires a payment of at least R1.00." : "The order subtotal must be greater than zero." });
       }
 
       await storage.createShopOrder({
@@ -531,22 +576,32 @@ function storefrontRouter() {
         quoteId: quote.quoteId,
         reference,
         status: "pending",
+        paymentMethod,
         amountKobo,
         currency: "ZAR",
         customer: {
           ...input.customer,
           ...(input.customer.whatsappUpdates ? { whatsappConsentAt: new Date().toISOString() } : {}),
         },
-        items: quote.items.map(({ productId, name, unitPriceKobo, quantity }) => ({
-          productId,
-          name,
-          unitPrice: unitPriceKobo / 100,
-          quantity,
-        })),
+        items: quote.items.map(({ productId, name, unitPriceKobo, quantity }) => {
+          const product = currentProducts.find((candidate) => candidate.id === productId);
+          if (!product) throw new Error(`Product ${productId} was unavailable after checkout validation.`);
+          return {
+            productId,
+            name,
+            unitPrice: unitPriceKobo / 100,
+            unitCost: product.unitCost,
+            quantity,
+          };
+        }),
         delivery,
         paystackTransactionId: null,
         paystackAuthorizationUrl: null,
       });
+      if (paymentMethod === "manual") {
+        await enqueueManualOrderRequestNotifications(shop, (await storage.getShopOrderByReference(reference))!);
+        return res.status(201).json({ reference, paymentMethod: "manual" });
+      }
       try {
         const transaction = await initializePaystackTransaction({
           email: input.customer.email,
@@ -570,6 +625,7 @@ function storefrontRouter() {
       const shop = await storage.getShopBySlug(req.params.slug);
       const order = await storage.getShopOrderByReference(req.params.reference);
       if (!shop || !order || order.shopId !== shop.id) return res.status(404).json({ message: "Order not found" });
+      if (order.paymentMethod === "manual") return res.json(publicOrderStatus(order));
       if (order.status !== "paid") {
         const payment = await verifyPaystackTransaction(order.reference);
         if (payment.reference !== order.reference || payment.amount !== order.amountKobo || payment.currency !== order.currency) {
@@ -586,6 +642,31 @@ function storefrontRouter() {
     }),
   );
 
+  router.get(
+    "/domain/checkout/verify/:reference",
+    checkoutLimiter,
+    asyncRoute(async (req, res) => {
+      const shop = await storage.getShopByDomain(req.hostname.toLowerCase());
+      const order = await storage.getShopOrderByReference(req.params.reference);
+      if (!shop || !shop.isLive || !order || order.shopId !== shop.id) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+      if (order.paymentMethod === "manual") return res.json(publicOrderStatus(order));
+      if (order.status !== "paid") {
+        const payment = await verifyPaystackTransaction(order.reference);
+        if (payment.reference !== order.reference || payment.amount !== order.amountKobo || payment.currency !== order.currency) {
+          return res.status(409).json({ message: "The Paystack payment does not match this order." });
+        }
+        if (payment.status === "success") {
+          await markShopOrderPaid(order, String(payment.id));
+        } else if (payment.status === "failed" || payment.status === "abandoned") {
+          await storage.updateShopOrder(order.reference, { status: "failed" });
+        }
+      }
+      const current = await storage.getShopOrderByReference(order.reference);
+      return res.json(publicOrderStatus(current!));
+    }),
+  );
   router.get(
     "/domain/branding-image",
     asyncRoute(async (req, res) => {
@@ -854,12 +935,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }),
   );
   router.post(
+    "/shop/orders/:reference/status",
+    asyncRoute(async (req, res) => {
+      const input = z.object({ status: z.enum(["paid", "cancelled"]) }).parse(req.body);
+      const shop = await storage.getShopForUser((req as any).user.id);
+      const order = await storage.getShopOrderByReference(req.params.reference);
+      if (!shop || !order || order.shopId !== shop.id) return res.status(404).json({ message: "Order not found" });
+      if (order.paymentMethod !== "manual") {
+        return res.status(409).json({ message: "Only manual order requests can be updated here." });
+      }
+      if (order.status !== "pending") {
+        return res.status(409).json({ message: "This order request has already been resolved." });
+      }
+      const updated = await storage.resolveManualShopOrder(shop.id, order.reference, input.status);
+      if (!updated) return res.status(409).json({ message: "This order request has already been resolved." });
+      await enqueueManualOrderResolutionNotification(shop, updated, input.status);
+      return res.json(updated);
+    }),
+  );
+  router.post(
     "/shop/orders/:reference/ship",
     asyncRoute(async (req, res) => {
       const pickupSchedule = pickupWindowSchema.parse(req.body);
       const shop = await storage.getShopForUser((req as any).user.id);
       const order = await storage.getShopOrderByReference(req.params.reference);
       if (!shop || !order || order.shopId !== shop.id) return res.status(404).json({ message: "Order not found" });
+      if (order.paymentMethod !== "paystack_test") return res.status(409).json({ message: "Courier Guy shipment booking is only available for Paystack checkout orders." });
       if (order.status !== "paid") return res.status(409).json({ message: "Only paid orders can be shipped" });
       if (order.delivery.method === "collection") return res.status(400).json({ message: "Collection orders do not need a courier shipment" });
       if (order.delivery.shipment) return res.status(409).json({ message: "A Courier Guy shipment has already been created" });
@@ -1027,7 +1128,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Validate partial data
       const { adjustmentReason, ...yarnData } = yarnUpdateRequestSchema.parse(req.body);
+      if (
+        yarnData.quantityInStock !== undefined &&
+        yarnData.quantityInStock < existingYarn.reservedQuantity
+      ) {
+        return res.status(409).json({
+          message: `At least ${existingYarn.reservedQuantity} balls are reserved by active projects. Add stock or cancel those projects before reducing on-hand stock.`,
+        });
+      }
       const updatedYarn = await storage.updateYarn(id, yarnData);
+      if (!updatedYarn) {
+        return res.status(409).json({ message: "Stock changed while you were saving. Refresh inventory and try again." });
+      }
       
       // Log activity
       await storage.logActivity({
@@ -1059,9 +1171,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!existingYarn) {
       return res.status(404).json({ message: "Yarn not found" });
     }
+
+    if (existingYarn.reservedQuantity > 0) {
+      return res.status(409).json({
+        message: `This yarn has ${existingYarn.reservedQuantity} balls reserved by active projects. Cancel those projects before deleting it.`,
+      });
+    }
+    const usingProjects = (await storage.getAllProjects()).filter(
+      (project) => project.yarnId === id && (project.status === "pending" || project.status === "in_progress"),
+    );
+    if (usingProjects.length > 0) {
+      return res.status(409).json({
+        message: `This yarn is selected by ${usingProjects.length} pending or active project${usingProjects.length === 1 ? "" : "s"}. Change or cancel those projects before deleting it.`,
+      });
+    }
     
     const deleted = await storage.deleteYarn(id);
     if (!deleted) {
+      const latestYarn = await storage.getYarn(id);
+      if (latestYarn?.reservedQuantity) {
+        return res.status(409).json({
+          message: `This yarn now has ${latestYarn.reservedQuantity} balls reserved by active projects. Cancel those projects before deleting it.`,
+        });
+      }
+      const latestProjects = (await storage.getAllProjects()).filter(
+        (project) => project.yarnId === id && (project.status === "pending" || project.status === "in_progress"),
+      );
+      if (latestProjects.length > 0) {
+        return res.status(409).json({ message: "This yarn is now selected by a pending or active project. Change or cancel the project before deleting it." });
+      }
       return res.status(500).json({ message: "Failed to delete yarn" });
     }
     
@@ -1112,7 +1250,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create new project
   router.post("/projects", async (req, res) => {
     try {
-      const projectData = insertProjectSchema.parse(req.body);
+      const projectData = projectDetailsSchema.parse(req.body);
+      if (projectData.yarnId) {
+        const yarn = await storage.getYarn(projectData.yarnId);
+        if (!yarn) return res.status(400).json({ message: "Selected yarn is no longer in inventory." });
+        projectData.preferredYarnType = `${yarn.type} - ${yarn.color}`;
+      } else {
+        projectData.yarnId = null;
+        projectData.preferredYarnType = null;
+      }
       const newProject = await storage.createProject(projectData);
       
       // Log activity
@@ -1145,9 +1291,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Project not found" });
       }
       
-      // Validate partial data
-      const projectData = insertProjectSchema.partial().parse(req.body);
+      if (existingProject.status !== "pending") {
+        return res.status(409).json({ message: "Only pending projects can be edited. Cancel the project first to release any reserved yarn." });
+      }
+
+      const projectData = projectDetailsSchema.partial().parse(req.body);
+      if (projectData.yarnId !== undefined) {
+        if (projectData.yarnId === null) {
+          projectData.preferredYarnType = null;
+        } else {
+          const yarn = await storage.getYarn(projectData.yarnId);
+          if (!yarn) return res.status(400).json({ message: "Selected yarn is no longer in inventory." });
+          projectData.preferredYarnType = `${yarn.type} - ${yarn.color}`;
+        }
+      }
       const updatedProject = await storage.updateProject(id, projectData);
+      if (!updatedProject) return res.status(409).json({ message: "Project changed while you were saving. Refresh and try again." });
       
       // Log activity
       await storage.logActivity({
@@ -1155,7 +1314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         entityId: id,
         description: `Updated project: ${updatedProject!.name}`
       });
-      
+
       res.json(updatedProject);
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -1164,6 +1323,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Failed to update project" });
     }
   });
+
+  router.post("/projects/:id/start", asyncRoute(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: "Invalid project ID." });
+    const result = await storage.startProject(id);
+    if ("reason" in result) {
+      const messages = {
+        not_found: [404, "Project not found."],
+        invalid_status: [409, "Only pending projects can be started."],
+        yarn_not_found: [409, "The project's selected yarn is no longer in inventory."],
+        insufficient_stock: [409, "There are not enough available yarn balls to start this project. Add stock or adjust the project requirement."],
+      } as const;
+      const [status, message] = messages[result.reason];
+      return res.status(status).json({ message });
+    }
+    await storage.logActivity({
+      type: "start_project",
+      entityId: id,
+      description: `Started project: ${result.project.name}`,
+    });
+    return res.json(result.project);
+  }));
+
+  router.post("/projects/:id/complete", asyncRoute(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: "Invalid project ID." });
+    const body = z.object({ ballsUsed: z.number().int().min(0).max(10000) }).parse(req.body);
+    const current = await storage.getProject(id);
+    if (!current) return res.status(404).json({ message: "Project not found." });
+    if (current.yarnId === null && body.ballsUsed !== 0) {
+      return res.status(400).json({ message: "This project has no inventory yarn selected, so balls used must be zero." });
+    }
+    const result = await storage.completeProject(id, body.ballsUsed);
+    if ("reason" in result) {
+      const messages = {
+        not_found: [404, "Project not found."],
+        invalid_status: [409, "Only in-progress projects can be completed."],
+        yarn_not_found: [409, "The project's yarn was removed from inventory."],
+        insufficient_stock: [409, "There are not enough unreserved balls to cover the amount used. Adjust stock or enter a lower amount."],
+      } as const;
+      const [status, message] = messages[result.reason];
+      return res.status(status).json({ message });
+    }
+    await storage.logActivity({
+      type: "complete_project",
+      entityId: id,
+      description: `Completed project: ${result.project.name}${result.project.yarnId !== null ? ` using ${body.ballsUsed} yarn balls` : ""}`,
+    });
+    return res.json(result.project);
+  }));
+
+  router.post("/projects/:id/cancel", asyncRoute(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: "Invalid project ID." });
+    const result = await storage.cancelProject(id);
+    if ("reason" in result) {
+      const messages = {
+        not_found: [404, "Project not found."],
+        invalid_status: [409, "Only pending or in-progress projects can be cancelled."],
+        yarn_not_found: [409, "The project's yarn is missing, so its reservation could not be released."],
+        insufficient_stock: [409, "The project reservation could not be released."],
+      } as const;
+      const [status, message] = messages[result.reason];
+      return res.status(status).json({ message });
+    }
+    await storage.logActivity({
+      type: "cancel_project",
+      entityId: id,
+      description: `Cancelled project: ${result.project.name}`,
+    });
+    return res.json(result.project);
+  }));
   
   // Delete project
   router.delete("/projects/:id", async (req, res) => {
@@ -1257,10 +1488,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const calculations = await storage.getAllCalculations();
       const recentActivities = await storage.getRecentActivity(5);
       const lowStockYarns = await storage.getLowStockYarns(5);
+      const shop = await storage.getShopForUser((req as any).user.id);
+      const shopOrders = shop ? await storage.listShopOrders(shop.id) : [];
       
       const totalYarns = yarns.length;
       const totalProjects = projects.length;
-      const totalStockBalls = yarns.reduce((total, yarn) => total + yarn.quantityInStock, 0);
+      const totalStockBalls = yarns.reduce((total, yarn) => total + yarn.quantityInStock - yarn.reservedQuantity, 0);
       const averagePrice =
         calculations.length > 0
           ? Number((calculations.reduce((sum, calculation) => sum + calculation.finalPrice, 0) / calculations.length).toFixed(2))
@@ -1273,6 +1506,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         totalProjects,
         averagePrice,
         pricingCalculationCount: calculations.length,
+        shopMetrics: calculateShopMetrics(shopOrders),
         recentActivities,
         lowStockYarns
       });

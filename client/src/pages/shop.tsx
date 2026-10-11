@@ -13,12 +13,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { errorMessage } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
+import SummaryCard from "@/components/dashboard/summary-card";
+import { calculateShopMetrics } from "@shared/shop-metrics";
+import { formatCurrency } from "@/lib/utils";
 
 interface ShopSettings {
   slug: string;
   name: string;
   description: string;
   themeColor: string;
+  paymentMode: "manual" | "paystack_test";
   brandingImageUrl: string;
   isLive: boolean;
   customDomain: string | null;
@@ -52,6 +56,7 @@ interface Product {
   name: string;
   description: string;
   price: number;
+  unitCost: number | null;
   parcelLengthCm: number | null;
   parcelWidthCm: number | null;
   parcelHeightCm: number | null;
@@ -64,13 +69,14 @@ interface Product {
 interface ShopOrder {
   id: number;
   reference: string;
-  status: "pending" | "paid" | "failed";
+  status: "pending" | "paid" | "failed" | "cancelled";
+  paymentMethod: "manual" | "paystack_test";
   amountKobo: number;
   customer: { name: string; email: string; phone: string };
   items: Array<{ productId: number; name: string; unitPrice: number; quantity: number }>;
   delivery: {
     method: "collection" | "courier" | "locker";
-    feeKobo: number;
+    feeKobo: number | null;
     serviceLevelName?: string;
     address?: { street_address: string; local_area: string; city: string; zone: string; code: string };
     pickupPoint?: { id: string | number; name: string; address?: string };
@@ -87,6 +93,7 @@ const emptyShop = (email: string): ShopSettings => ({
   name: "",
   description: "",
   themeColor: "#6b4f3f",
+  paymentMode: "manual",
   brandingImageUrl: "",
   isLive: false,
   customDomain: null,
@@ -224,6 +231,11 @@ function ShopSettingsPanel() {
       </CardHeader>
       <CardContent>
         <form onSubmit={submit} className="space-y-6">
+          <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+            {form.paymentMode === "manual"
+              ? "Customer checkout is set to manual order requests. The app will not take payment or quote shipping; you contact customers directly to confirm both."
+              : "Customer checkout is in Paystack test mode. Payments are simulated and no real money is collected."}
+          </div>
           <section className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="shop-name">Shop name</Label>
@@ -315,8 +327,8 @@ function ShopSettingsPanel() {
             {([
               ["isLive", "Publish shop", "Let visitors see published products."],
               ["collectionEnabled", "Collection", "Allow customers to collect orders from you."],
-              ["courierEnabled", "Courier Guy delivery", "Enable address-to-address delivery quotes."],
-              ["lockersEnabled", "Courier Guy lockers", "Enable delivery to a Courier Guy locker or pickup point."],
+              ["courierEnabled", "Courier Guy delivery", form.paymentMode === "manual" ? "Allow address delivery requests; agree on shipping directly." : "Enable address-to-address delivery quotes."],
+              ["lockersEnabled", "Courier Guy lockers", form.paymentMode === "manual" ? "Allow locker requests; agree on fulfilment directly." : "Enable delivery to a Courier Guy locker or pickup point."],
             ] as const).map(([key, title, description]) => (
               <div key={key} className="flex items-center justify-between gap-4">
                 <div>
@@ -341,7 +353,13 @@ function ShopSettingsPanel() {
               ] as const).map(([key, label]) => (
                 <div key={key} className="space-y-2">
                   <Label htmlFor={key}>{label}</Label>
-                  <Input id={key} type={key === "senderEmail" ? "email" : "text"} value={form[key]} onChange={(e) => update(key, e.target.value)} required={shippingEnabled} />
+                  <Input
+                    id={key}
+                    type={key === "senderEmail" ? "email" : "text"}
+                    value={form[key]}
+                    onChange={(e) => update(key, e.target.value)}
+                    required={shippingEnabled || (key === "senderEmail" && form.isLive)}
+                  />
                 </div>
               ))}
               {([
@@ -392,7 +410,7 @@ function ShopSettingsPanel() {
             <p className="text-xs text-neutral-500">The server must have COURIERGUY_ENCRYPTION_KEY configured to save credentials.</p>
           </section>
 
-          <section className="space-y-4 rounded-md border border-neutral-200 p-4">
+          {/* <section className="space-y-4 rounded-md border border-neutral-200 p-4">
             <div>
               <h3 className="font-medium text-lg">WhatsApp order updates</h3>
               <p className="text-sm text-neutral-500">
@@ -456,7 +474,7 @@ function ShopSettingsPanel() {
                 Remove saved WhatsApp credentials
               </label>
             )}
-          </section>
+          </section> */}
 
           {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
           {saved && <p role="status" className="text-sm text-green-700">{saved}</p>}
@@ -482,6 +500,7 @@ function ProductEditor({
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
   const [price, setPrice] = useState(product?.price.toString() ?? "");
+  const [unitCost, setUnitCost] = useState(product?.unitCost?.toString() ?? "");
   const [parcelLengthCm, setParcelLengthCm] = useState(product?.parcelLengthCm?.toString() ?? "");
   const [parcelWidthCm, setParcelWidthCm] = useState(product?.parcelWidthCm?.toString() ?? "");
   const [parcelHeightCm, setParcelHeightCm] = useState(product?.parcelHeightCm?.toString() ?? "");
@@ -537,6 +556,7 @@ function ProductEditor({
         name,
         description,
         price: Number(price),
+        unitCost: unitCost.trim() ? Number(unitCost) : null,
         imageUrl: "",
         parcelLengthCm: parcelLengthCm ? Number(parcelLengthCm) : null,
         parcelWidthCm: parcelWidthCm ? Number(parcelWidthCm) : null,
@@ -566,6 +586,10 @@ function ProductEditor({
         <div className="space-y-2">
           <Label htmlFor={`product-price-${product?.id ?? "new"}`}>Price (ZAR)</Label>
           <Input id={`product-price-${product?.id ?? "new"}`} type="number" min="0.01" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} required />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor={`product-cost-${product?.id ?? "new"}`}>Unit cost (ZAR, optional)</Label>
+          <Input id={`product-cost-${product?.id ?? "new"}`} type="number" min="0" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} />
         </div>
         <div className="space-y-2 md:col-span-2">
           <Label htmlFor={`product-description-${product?.id ?? "new"}`}>Description</Label>
@@ -799,11 +823,28 @@ function OrdersPanel() {
     }
   };
 
+  const updateManualOrder = async (order: ShopOrder, status: "paid" | "cancelled") => {
+    const message = status === "paid"
+      ? `Confirm that you have received payment for order ${order.reference}?`
+      : `Cancel order request ${order.reference}?`;
+    if (!window.confirm(message)) return;
+    setBusyReference(order.reference);
+    setError("");
+    try {
+      await apiRequest("POST", `/api/shop/orders/${encodeURIComponent(order.reference)}/status`, { status });
+      await queryClient.invalidateQueries({ queryKey: ["/api/shop/orders"] });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusyReference("");
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Orders</CardTitle>
-        <CardDescription>Paystack checkout orders for your shop. Payment is verified on the server before an order is marked paid.</CardDescription>
+        <CardDescription>Review customer orders. Confirm manually received payments only after checking your own payment records.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
@@ -816,8 +857,12 @@ function OrdersPanel() {
             const deliveryLabel = order.delivery.method === "collection"
               ? "Collection"
               : order.delivery.method === "locker"
-                ? `Courier Guy locker · ${order.delivery.pickupPoint?.name ?? "Pickup point"}`
-                : `Courier Guy delivery · ${order.delivery.serviceLevelName ?? "Rate selected"}`;
+                ? order.paymentMethod === "manual"
+                  ? `Locker delivery · ${order.delivery.pickupPoint?.name ?? "to be agreed"}`
+                  : `Courier Guy locker · ${order.delivery.pickupPoint?.name ?? "Pickup point"}`
+                : order.paymentMethod === "manual"
+                  ? "Delivery address"
+                  : `Courier Guy delivery · ${order.delivery.serviceLevelName ?? "Rate selected"}`;
             const address = order.delivery.address
               ? [
                   order.delivery.address.street_address,
@@ -834,8 +879,8 @@ function OrdersPanel() {
                     <h3 className="font-medium">{order.customer.name} · {order.reference}</h3>
                     <p className="text-sm text-neutral-600">{order.customer.email} · {order.customer.phone}</p>
                   </div>
-                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${order.status === "paid" ? "bg-green-100 text-green-800" : order.status === "failed" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
-                    {order.status.toUpperCase()}
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${order.status === "paid" ? "bg-green-100 text-green-800" : order.status === "failed" || order.status === "cancelled" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
+                    {order.paymentMethod === "manual" && order.status === "paid" ? "PAYMENT CONFIRMED BY SHOP" : order.paymentMethod === "manual" && order.status === "pending" ? "AWAITING SHOP" : order.status.toUpperCase()}
                   </span>
                 </div>
                 <ul className="space-y-1 text-sm text-neutral-700">
@@ -845,11 +890,27 @@ function OrdersPanel() {
                 </ul>
                 <div className="flex flex-wrap justify-between gap-2 border-t pt-3 text-sm">
                   <span>{deliveryLabel}{address ? ` — ${address}` : ""}</span>
-                  <span className="font-semibold">Total R {(order.amountKobo / 100).toFixed(2)}</span>
+                  <span className="font-semibold">{order.paymentMethod === "manual" ? "Product subtotal" : "Total"} R {(order.amountKobo / 100).toFixed(2)}</span>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-500">
                   <span>{new Date(order.createdAt).toLocaleString()}</span>
-                  {order.status === "paid" && order.delivery.method !== "collection" && (
+                  {order.paymentMethod === "manual" && order.status === "pending" && (
+                    <div className="flex w-full flex-wrap gap-2 rounded-md bg-neutral-50 p-3">
+                      <p className="w-full text-sm text-neutral-700">
+                        No online payment or shipping charge was collected. Contact the customer to agree on availability, payment, and delivery.
+                      </p>
+                      <Button type="button" size="sm" disabled={!!busyReference} onClick={() => void updateManualOrder(order, "paid")}>
+                        {busyReference === order.reference ? "Updating…" : "Confirm payment received"}
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={!!busyReference} onClick={() => void updateManualOrder(order, "cancelled")}>
+                        Cancel request
+                      </Button>
+                    </div>
+                  )}
+                  {order.paymentMethod === "manual" && order.status === "paid" && (
+                    <p className="w-full text-sm text-green-700">Payment marked as received by the shop. Arrange fulfilment directly with the customer.</p>
+                  )}
+                  {order.paymentMethod === "paystack_test" && order.status === "paid" && order.delivery.method !== "collection" && (
                     order.delivery.shipment ? (
                       <div className="space-y-1 text-right">
                         <p className="font-medium text-green-700">Courier Guy shipment created</p>
@@ -894,6 +955,47 @@ function OrdersPanel() {
   );
 }
 
+function ShopMetricsCards() {
+  const { data: orders, isLoading, error } = useQuery<ShopOrder[]>({
+    queryKey: ["/api/shop/orders"],
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
+  if (error) {
+    return <p role="alert" className="text-sm text-red-600">Could not load shop metrics. Please try again.</p>;
+  }
+
+  const metrics = calculateShopMetrics(orders ?? []);
+  const profitFooter = metrics.ordersWithCostData
+    ? `Based on ${metrics.ordersWithCostData} paid order${metrics.ordersWithCostData === 1 ? "" : "s"} with recorded costs`
+    : "Record product costs to calculate profit";
+
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <SummaryCard title="Total revenue" value={isLoading && !orders ? "—" : formatCurrency(metrics.revenue)} subtext="Product sales from paid orders" icon="ri-money-dollar-circle-line" iconColor="text-primary-500" />
+      <SummaryCard
+        title="Total profits"
+        value={metrics.grossProfit === null ? "—" : formatCurrency(metrics.grossProfit)}
+        subtext="Gross profit, excluding delivery fees"
+        icon="ri-funds-line"
+        iconColor="text-green-600"
+        footer={{ text: profitFooter, color: "text-neutral-600" }}
+      />
+      <SummaryCard title="Successful deliveries" value={isLoading && !orders ? "—" : metrics.successfulDeliveryCount} subtext="Courier orders marked delivered or complete" icon="ri-truck-line" iconColor="text-primary-500" />
+      <SummaryCard title="Clients" value={isLoading && !orders ? "—" : metrics.clientCount} subtext="Unique customers with paid orders" icon="ri-user-heart-line" iconColor="text-primary-500" />
+      <SummaryCard title="Paid orders" value={isLoading && !orders ? "—" : metrics.paidOrderCount} subtext="Successfully paid shop orders" icon="ri-shopping-bag-3-line" iconColor="text-primary-500" />
+      <SummaryCard
+        title="Average order value"
+        value={metrics.averageOrderValue === null ? "—" : formatCurrency(metrics.averageOrderValue)}
+        subtext="Average product sales per paid order"
+        icon="ri-bar-chart-line"
+        iconColor="text-primary-500"
+      />
+    </div>
+  );
+}
+
 export default function Shop() {
   return (
     <div className="space-y-6">
@@ -901,6 +1003,7 @@ export default function Shop() {
         <h2 className="font-poppins font-semibold text-2xl text-neutral-900">Shop</h2>
         <p className="text-neutral-600">Manage your independent store, products, collection and shipping.</p>
       </div>
+      <ShopMetricsCards />
       <ShopSettingsPanel />
       <ProductsPanel />
       <OrdersPanel />

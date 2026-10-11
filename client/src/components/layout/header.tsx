@@ -14,6 +14,7 @@ export default function Header() {
     // { path: "/about", label: "About", icon: "ri-information-line" },
     // { path: "contact", label: "Contact", icon: "ri-mail-line" },
     { path: "/settings", label: "Settings", icon: "ri-settings-3-line" },
+    { path: "admin", label: "Admin", icon: "ri-admin-line" },
     { path: "/profile", label: "Profile", icon: "ri-user-line" },
   ];
   

@@ -16,6 +16,7 @@ interface PublicShopResponse {
     themeColor: string;
     brandingImageUrl: string;
     checkoutEnabled: boolean;
+    paymentMode: "manual" | "paystack_test";
     collectionEnabled: boolean;
     courierEnabled: boolean;
     lockersEnabled: boolean;
@@ -94,11 +95,13 @@ function CheckoutDialog({
   items,
   open,
   onOpenChange,
+  onOrderSubmitted,
 }: {
   shop: NonNullable<PublicShopResponse["shop"]>;
   items: Array<{ productId: number; quantity: number }>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOrderSubmitted: (reference: string) => void;
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -179,7 +182,9 @@ function CheckoutDialog({
       const result = await response.json() as CheckoutQuote;
       setQuote(result);
       setServiceLevelCode(result.rates[0]?.code ?? "");
-      setInfo("Delivery options are ready. Review the total, then continue to Paystack.");
+      setInfo(shop.paymentMode === "manual"
+        ? "Review your order request. The shop will confirm availability and shipping costs before you pay."
+        : "Delivery options are ready. Review the total, then continue to Paystack.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not calculate checkout options.");
     } finally {
@@ -197,8 +202,15 @@ function CheckoutDialog({
         customer: { ...deliveryContact, whatsappUpdates },
         serviceLevelCode,
       });
-      const { authorizationUrl } = await response.json() as { authorizationUrl: string };
-      window.location.assign(authorizationUrl);
+      const result = await response.json() as { authorizationUrl?: string; reference: string; paymentMethod?: string };
+      if (result.paymentMethod === "manual") {
+        onOrderSubmitted(result.reference);
+        onOpenChange(false);
+      } else if (result.authorizationUrl) {
+        window.location.assign(result.authorizationUrl);
+      } else {
+        throw new Error("Checkout did not return a payment link. Please try again.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start Paystack checkout.");
       setBusy(false);
@@ -232,15 +244,17 @@ function CheckoutDialog({
                 <Input id="checkout-email" type="email" autoComplete="email" value={email} onChange={(event) => { setEmail(event.target.value); invalidateQuote(); }} required maxLength={254} />
               </div>
             </div>
-            <label className="flex cursor-pointer items-start gap-2 text-sm text-neutral-700">
-              <input
-                type="checkbox"
-                checked={whatsappUpdates}
-                onChange={(event) => setWhatsappUpdates(event.target.checked)}
-                className="mt-1"
-              />
-              <span>I consent to receive WhatsApp updates about this order and its delivery on this number.</span>
-            </label>
+            {shop.paymentMode === "paystack_test" && (
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-neutral-700">
+                <input
+                  type="checkbox"
+                  checked={whatsappUpdates}
+                  onChange={(event) => setWhatsappUpdates(event.target.checked)}
+                  className="mt-1"
+                />
+                <span>I consent to receive WhatsApp updates about this order and its delivery on this number.</span>
+              </label>
+            )}
           </section>
 
           <section className="space-y-3">
@@ -248,8 +262,8 @@ function CheckoutDialog({
             <div className="space-y-2">
               {([
                 ["collection", shop.collectionEnabled, "Collection"],
-                ["courier", shop.courierEnabled, "Courier Guy delivery to an address"],
-                ["locker", shop.lockersEnabled, "Courier Guy locker"],
+                ["courier", shop.courierEnabled, shop.paymentMode === "manual" ? "Delivery to an address (to be arranged)" : "Courier Guy delivery to an address"],
+                ["locker", shop.lockersEnabled, shop.paymentMode === "manual" ? "Locker delivery (to be arranged)" : "Courier Guy locker"],
               ] as const).filter(([, enabled]) => enabled).map(([value, , label]) => (
                 <label key={value} className="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm">
                   <input type="radio" name="delivery-method" value={value} checked={method === value} onChange={() => { setMethod(value); invalidateQuote(); }} />
@@ -283,7 +297,7 @@ function CheckoutDialog({
             </section>
           )}
 
-          {method === "locker" && (
+          {method === "locker" && shop.paymentMode === "paystack_test" && (
             <section className="space-y-2">
               <p className="text-sm text-neutral-600">Use your location to find nearby Courier Guy lockers.</p>
               <Button type="button" variant="outline" onClick={findPickupPoints} disabled={busy}>
@@ -310,8 +324,13 @@ function CheckoutDialog({
               )}
             </section>
           )}
+          {method === "locker" && shop.paymentMode === "manual" && (
+            <p className="rounded-md bg-neutral-50 p-3 text-sm text-neutral-600">
+              The shop will contact you to agree on a suitable locker or delivery option.
+            </p>
+          )}
 
-          {quoteIsValid && quote && (
+          {quoteIsValid && quote && shop.paymentMode === "paystack_test" && (
             <section className="space-y-3 rounded-md bg-neutral-50 p-4">
               <h3 className="font-medium">Choose a delivery rate</h3>
               {quote.rates.map((rate) => (
@@ -336,14 +355,25 @@ function CheckoutDialog({
           {info && <p role="status" className="text-sm text-green-700">{info}</p>}
           {quoteIsValid ? (
             <Button type="button" className="w-full" onClick={pay} disabled={busy || !selectedRate}>
-              {busy ? "Connecting to Paystack…" : `Pay ${zar(totalKobo)} with Paystack test mode`}
+              {busy
+                ? shop.paymentMode === "manual" ? "Submitting order request…" : "Connecting to Paystack…"
+                : shop.paymentMode === "manual" ? `Submit order request · ${zar(quote.subtotalKobo)}`
+                  : `Pay ${zar(totalKobo)} with Paystack test mode`}
             </Button>
           ) : (
-            <Button type="submit" className="w-full" disabled={busy || !items.length || (method === "locker" && !selectedPickupPoint)}>
-              {busy ? "Preparing checkout…" : "Calculate delivery and total"}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={busy || !items.length || (shop.paymentMode === "paystack_test" && method === "locker" && !selectedPickupPoint)}
+            >
+              {busy ? "Preparing checkout…" : shop.paymentMode === "manual" ? "Review order request" : "Calculate delivery and total"}
             </Button>
           )}
-          <p className="text-xs text-neutral-500">Payments are currently processed in Paystack test mode. No real payment will be collected.</p>
+          <p className="text-xs text-neutral-500">
+            {shop.paymentMode === "manual"
+              ? "No payment is taken here. The shop will contact you to confirm the final total, payment method, and shipping."
+              : "Payments are currently processed in Paystack test mode. No real payment will be collected."}
+          </p>
         </form>
       </DialogContent>
     </Dialog>
@@ -356,11 +386,16 @@ export default function Storefront({ slug, customDomain = false }: { slug?: stri
   const [cart, setCart] = useState<Record<number, number>>({});
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const reference = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("reference") ?? "";
-  const orderQuery = useQuery<{ reference: string; status: string; amountKobo: number; currency: string }>({
-    queryKey: [`/api/storefront/${slug}/checkout/verify/${reference}`],
-    enabled: !!slug && !!reference,
+  const orderStatusPath = customDomain
+    ? `/api/storefront/domain/checkout/verify/${encodeURIComponent(reference)}`
+    : `/api/storefront/${encodeURIComponent(slug ?? "")}/checkout/verify/${encodeURIComponent(reference)}`;
+  const orderQuery = useQuery<{ reference: string; status: string; paymentMethod: "manual" | "paystack_test"; amountKobo: number; currency: string }>({
+    queryKey: [orderStatusPath],
+    enabled: (customDomain || !!slug) && !!reference,
     staleTime: 0,
     retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.paymentMethod === "manual" && query.state.data.status === "pending" ? 5000 : false,
   });
 
   if (isLoading) return <div className="min-h-screen bg-neutral-50 p-8 text-center text-neutral-600">Loading shop…</div>;
@@ -399,10 +434,10 @@ export default function Storefront({ slug, customDomain = false }: { slug?: stri
             </div>
           </div>
           <p className="mt-4 text-sm opacity-80">
-            Fulfilment: {[
+            Fulfilment options: {[
               shop.collectionEnabled && "Collection",
-              shop.courierEnabled && "Courier Guy delivery",
-              shop.lockersEnabled && "Courier Guy lockers",
+              shop.courierEnabled && (shop.paymentMode === "manual" ? "Delivery to an address" : "Courier Guy delivery"),
+              shop.lockersEnabled && (shop.paymentMode === "manual" ? "Locker delivery (to be arranged)" : "Courier Guy lockers"),
             ].filter(Boolean).join(" · ")}
           </p>
         </div>
@@ -410,12 +445,15 @@ export default function Storefront({ slug, customDomain = false }: { slug?: stri
       <main className="mx-auto max-w-6xl px-4 py-8">
         {reference && (
           <div className="mb-6 rounded-md border bg-white p-4" role="status">
-            {orderQuery.isLoading && <p>Checking your Paystack payment…</p>}
+            {orderQuery.isLoading && <p>Checking your order status…</p>}
             {orderQuery.isError && <p className="text-red-700">We could not confirm this payment yet. Keep your reference {reference} and contact the shop owner if needed.</p>}
-            {orderQuery.data?.status === "paid" && <p className="font-medium text-green-700">Payment confirmed. Your order {reference} has been sent to {shop.name}.</p>}
-            {orderQuery.data?.status === "pending" && <p>Payment is still being confirmed. Reference: {reference}</p>}
+            {orderQuery.data?.status === "paid" && <p className="font-medium text-green-700">{orderQuery.data.paymentMethod === "manual" ? "The shop confirmed your payment." : "Payment confirmed."} Order {reference} has been sent to {shop.name}.</p>}
+            {orderQuery.data?.status === "pending" && <p>{orderQuery.data.paymentMethod === "manual"
+              ? `Order request received. No payment has been taken. The shop will contact you to confirm availability, shipping costs, and how to pay. Reference: ${reference}`
+              : `Payment is still being confirmed. Reference: ${reference}`}</p>}
             {orderQuery.data?.status === "failed" && <p className="text-red-700">The payment was not completed. Reference: {reference}</p>}
-            {orderQuery.data?.status === "pending" && (
+            {orderQuery.data?.status === "cancelled" && <p className="text-neutral-700">This order request was cancelled. Reference: {reference}</p>}
+            {orderQuery.data?.status === "pending" && orderQuery.data.paymentMethod === "paystack_test" && (
               <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => void orderQuery.refetch()}>
                 Check payment again
               </Button>
@@ -480,7 +518,7 @@ export default function Storefront({ slug, customDomain = false }: { slug?: stri
                   <p className="text-sm text-neutral-600">{itemCount} item{itemCount === 1 ? "" : "s"} · R {cartTotal.toFixed(2)} before delivery</p>
                 </div>
                 <div className="space-y-2 text-right">
-                  {!shop.checkoutEnabled && <p className="text-sm text-amber-700">Online checkout is not configured yet. Please contact the shop owner.</p>}
+                  {!shop.checkoutEnabled && <p className="text-sm text-amber-700">Checkout is not available yet. Please contact the shop owner.</p>}
                   <Button type="button" onClick={() => setCheckoutOpen(true)} disabled={!shop.checkoutEnabled} style={{ backgroundColor: shop.themeColor, color: themeText }}>
                     Continue to checkout
                   </Button>
@@ -495,10 +533,15 @@ export default function Storefront({ slug, customDomain = false }: { slug?: stri
             items={cartItems}
             open={checkoutOpen}
             onOpenChange={setCheckoutOpen}
+            onOrderSubmitted={(orderReference) => {
+              window.location.assign(`${window.location.pathname}?reference=${encodeURIComponent(orderReference)}`);
+            }}
           />
         )}
         <p className="mt-8 border-t pt-4 text-sm text-neutral-500">
-          Payments are processed securely by Paystack. Shipping rates are quoted by Courier Guy at checkout.
+          {shop.paymentMode === "manual"
+            ? "This shop does not take online payments. The shop owner will contact you directly to confirm payment and shipping arrangements."
+            : "Payments are processed securely by Paystack test mode. Courier Guy shipping rates are quoted at checkout."}
         </p>
       </main>
     </div>

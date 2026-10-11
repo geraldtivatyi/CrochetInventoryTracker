@@ -47,7 +47,7 @@ export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTablePro
       console.error("Error deleting yarn:", error);
       toast({
         title: "Error",
-        description: "There was a problem deleting the yarn",
+        description: error instanceof Error ? error.message : "There was a problem deleting the yarn",
         variant: "destructive",
       });
     } finally {
@@ -64,14 +64,16 @@ export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTablePro
             <TableHead>Yarn Type</TableHead>
             <TableHead>Color</TableHead>
             <TableHead>Cost Per Ball</TableHead>
-            <TableHead>In Stock</TableHead>
+            <TableHead>On Hand</TableHead>
+            <TableHead>In Use</TableHead>
+            <TableHead>Available</TableHead>
             <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {yarns.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} className="text-center py-6 text-neutral-500">
+              <TableCell colSpan={7} className="text-center py-6 text-neutral-500">
                 No yarns found. Add your first yarn to get started!
               </TableCell>
             </TableRow>
@@ -95,8 +97,18 @@ export default function YarnTable({ yarns, onEdit, onStockAdjust }: YarnTablePro
                   {formatCurrency(yarn.costPerBall)}
                 </TableCell>
                 <TableCell>
-                  <span className={`px-2 py-1 text-xs rounded-full ${stockStatusColor(yarn.quantityInStock)}`}>
+                  <span className="px-2 py-1 text-xs rounded-full bg-neutral-100 text-neutral-700">
                     {yarn.quantityInStock} balls
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">
+                    {yarn.reservedQuantity} balls
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className={`px-2 py-1 text-xs rounded-full ${stockStatusColor(yarn.quantityInStock - yarn.reservedQuantity)}`}>
+                    {yarn.quantityInStock - yarn.reservedQuantity} balls
                   </span>
                 </TableCell>
                 <TableCell className="text-sm font-medium min-w-[120px]">

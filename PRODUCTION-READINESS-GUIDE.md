@@ -1,17 +1,20 @@
 # CrochetNook production-readiness guide
 
-This guide is a practical launch checklist for the current CrochetNook implementation. Complete the business, hosting, email, payment, courier and messaging steps in order, and test each provider using sandbox/test credentials before accepting real customers.
+This guide is a practical launch checklist for the current CrochetNook implementation. The shop checkout defaults to manual order requests; customers are not charged by the app. Complete the business, hosting, email, privacy and customer-support steps before accepting real customer details.
+
+For the ordered, task-by-task launch checklist with pass criteria, see [PRODUCTION-MVP-CHECKLIST.md](./PRODUCTION-MVP-CHECKLIST.md). This guide has additional deployment and optional provider setup details.
 
 ## Important: current launch blockers
 
-The app is **not ready to accept real payments or issue statutory tax invoices yet**:
+The app is **not ready to accept or route real payments, or issue statutory tax invoices**:
 
-1. Paystack integration is deliberately restricted to `sk_test_` keys. There is no live-payment mode. Do not replace the test key with a live key and expect it to work; the app rejects live keys.
-2. The customer email is a plain-text payment receipt/order confirmation, not a VAT tax invoice. No tax invoice PDF or legal document attachment is generated.
-3. Courier Guy request/response handling, especially the tracking response fields and ETA, has not been validated against your live account.
-4. Meta, Paystack, SMTP and Courier Guy delivery have not been tested with your real accounts.
+1. Default checkout records manual order requests and does not accept or route payment. Sellers must agree payment and fulfilment directly with customers; the app does not provide payment dispute, reconciliation or seller payout services.
+2. The optional Paystack integration is test-only and deliberately restricted to `sk_test_` keys. There is no live-payment mode. Do not replace the test key with a live key and expect it to work; the app rejects live keys.
+3. The customer email used by the optional Paystack test flow is a plain-text payment receipt/order confirmation, not a VAT tax invoice. No tax invoice PDF or legal document attachment is generated.
+4. Courier Guy request/response handling, especially the tracking response fields and ETA, has not been validated against your live account.
+5. Meta, Paystack, SMTP and Courier Guy delivery have not been tested with your real accounts.
 
-Use the sandbox/test steps below to prove the flow. Before launch, plan the code, legal review and production testing needed to remove each blocker.
+Use the manual order-request steps and optional sandbox/test steps below to prove the flow. Before launch, complete the legal review and production testing needed for your business model.
 
 ## 1. Prepare the business and customer-facing policies
 
@@ -28,6 +31,7 @@ Do this before you publish the store:
 ### 2.1 Choose hosting and a public domain
 
 1. Choose a host for the Node.js app and PostgreSQL. A managed PostgreSQL provider is preferable to the development database settings in the included Compose file.
+   Production startup now fails without `DATABASE_URL` or `NEON_DATABASE_URL`; do not run a public shop on the in-memory development fallback.
 2. Configure a stable public HTTPS hostname, for example `https://shop.yourdomain.co.za`, and route it to the app. Set DNS, TLS certificates, renewal and health monitoring.
 3. If using shop-specific custom domains, configure DNS and TLS for each domain and ensure the hosting/reverse proxy routes those hostnames to CrochetNook.
 4. Set the production `APP_URL` to the canonical public app URL. It is used to build auth links and Paystack return URLs. Do not include a trailing slash.
@@ -48,7 +52,11 @@ APP_URL=https://your-public-app-domain
 COURIERGUY_ENCRYPTION_KEY=<64-hex-character-key>
 SHOP_SECRETS_ENCRYPTION_KEY=<separate-64-hex-character-key>
 
-# Paystack: test key only until the app's live mode is implemented.
+# Default shop checkout: manual order requests; no customer payment is collected online.
+SHOP_PAYMENT_MODE=manual
+
+# Optional: explicitly opt into the Paystack test-only checkout.
+# SHOP_PAYMENT_MODE=paystack_test
 PAYSTACK_SECRET_KEY=sk_test_<test-secret>
 
 # SMTP: production email delivery requires a working mail provider.
@@ -92,7 +100,7 @@ Do not use this Compose database configuration for a public production launch un
 ### 2.3 Database, migrations and backups
 
 1. Before upgrading an existing installation, take a database backup and test that you can restore it.
-2. Deploy the app with the `drizzle/0006_order_notifications.sql` migration included. Runtime startup also creates/adds the current shop/order/notification tables and columns.
+2. Deploy the app with the current migrations, including `drizzle/0009_manual_order_requests.sql`. Runtime startup also creates/adds the current shop/order/notification tables and columns.
 3. Docker's `/docker-entrypoint-initdb.d` scripts only initialize a new empty Postgres data directory. They do not replay all migration files into an already initialized volume. Do not delete a volume to force migrations; that can destroy customer/order data.
 4. Verify that shops, products, orders, image bytes, and queued notifications survive an app restart and a database backup/restore.
 5. Set automated encrypted backups and a retention policy. Restrict database credentials and production access to named operators.
@@ -103,12 +111,20 @@ Do not use this Compose database configuration for a public production launch un
 2. Verify your sending domain with the provider and publish the DNS records it requests (typically SPF/DKIM and, where applicable, DMARC). Use the provider's current instructions rather than copying records from another domain.
 3. Put the SMTP host, port, username, password, TLS setting and verified `MAIL_FROM` address in production environment settings.
 4. Deploy and trigger a password-reset email using a test account. Confirm it arrives, links back to the correct HTTPS host and is not rewritten to localhost.
-5. Make a test shop order and verify that a successful payment queues and sends the plain-text receipt. Trigger a pickup reminder in a controlled test and verify email delivery.
+5. Submit a manual shop order request and verify that the customer acknowledgement and shop alert are queued and sent. If you also test `SHOP_PAYMENT_MODE=paystack_test`, verify the separate plain-text payment receipt. Trigger a pickup reminder in a controlled test and verify email delivery.
 6. Check the mail provider's bounce, spam, suppression and delivery logs. A successful SMTP handoff is not proof that an email reached the inbox.
 
 Until a mail provider is configured, reset emails and one-time codes work only as development console output, and production order emails are not delivered.
 
-## 4. Set up Paystack (test mode)
+## 4. Shop orders and payment mode
+
+The default `SHOP_PAYMENT_MODE=manual` is the MVP path. A customer submits an order request; the app records it and displays an order reference. The app takes no payment, does not store seller bank details, does not quote shipping, and does not book Courier Guy shipments for these orders. The shop owner contacts the customer directly to confirm product availability, the final shipping cost, payment arrangements and fulfilment. The owner may mark the order paid only after checking their own payment records, or cancel the request. This is an internal seller confirmation, not a Paystack-verified transaction.
+
+An email acknowledgement to the customer and an email alert to the shop contact are queued when the request is submitted. Configure and verify production SMTP, and monitor failed notification jobs; the app has no notification delivery dashboard. Orders remain visible in the owner Shop → Orders view if email delivery fails. Manual mode is not a marketplace payout system and the platform must not collect, hold or promise to route customer funds.
+
+To switch to the existing Paystack **test** setup for development/testing only, set `SHOP_PAYMENT_MODE=paystack_test` and configure `PAYSTACK_SECRET_KEY` with a test key. Restart the app after changing the variable. Live payments are not implemented; never set a live key or use this switch for production charges. A future live integration requires Paystack approval for the platform model, legal/accounting review, a purpose-built implementation, provider acceptance tests and a separate rollout.
+
+### Optional: test Paystack
 
 Official references: [Accept payments](https://paystack.com/docs/payments/accept-payments/), [verify payments](https://paystack.com/docs/payments/verify-payments/) and [webhooks](https://paystack.com/docs/payments/webhooks/).
 
@@ -124,9 +140,9 @@ Official references: [Accept payments](https://paystack.com/docs/payments/accept
 5. Complete an end-to-end test purchase. Confirm the browser returns to the right `/store/<slug>` page, the order reference is retained, the server verifies successful status, amount, currency and reference, and only then the order becomes paid.
 6. Test an abandoned/failed payment, a duplicate webhook delivery and a return-page verification. Confirm there is no shipment booking for an unpaid order and duplicate success events do not duplicate receipts.
 7. Confirm the shop order view shows the paid order and the customer receipt is sent.
-8. Before taking any real money, stop and arrange the live-payment implementation and review. Live keys are intentionally rejected today; changing `.env` cannot enable production charges. The implementation needs a deliberate live/test mode, environment-specific secrets, webhook verification, acceptance tests and operational rollout.
+8. Live payments are not supported. Do not take real money through the app or change the test key to a live key.
 
-The integration charges ZAR using integer minor units and sends customers to Paystack-hosted checkout. Never mark an order paid based only on the browser redirect.
+The test integration charges ZAR using integer minor units and sends customers to Paystack-hosted checkout. Never mark an order paid based only on the browser redirect.
 
 ## 5. Set up Courier Guy delivery and lockers
 
@@ -185,21 +201,21 @@ Each shop uses its **own** phone number ID, token and approved templates. A conf
 
 Use a test shop and test buyer addresses/numbers. Do not use real customer data during integration testing.
 
-1. Publish one test product with correct price and parcel dimensions/weight.
-2. Place a collection order and test Paystack test payment; verify the paid status, receipt email and optional consented WhatsApp order confirmation.
-3. Place an address-delivery order, compare the courier quote and chosen shipping rate with the Paystack amount, pay in test mode, and verify no shipment exists until the seller books it.
-4. Repeat for a locker order. Verify locker selection is stored and used in shipment booking.
-5. Book a future pickup window. Confirm the booking response and tracking reference. Verify 24-hour and 2-hour reminders are queued at the correct local times (a reminder whose scheduled time is already past is not sent retroactively).
-6. Poll tracking and compare status/ETA with Courier Guy. Confirm only changed tracking values create customer WhatsApp updates.
-7. Test provider outages, a failed webhook, repeated webhooks and app/database restarts. Confirm queued notifications remain persisted and retry.
+1. Publish one test product with an accurate price.
+2. In default manual mode, submit collection and delivery order requests. Confirm no Paystack or Courier Guy rate request is made, shipping is labelled as to-be-confirmed, no payment is taken, and the customer sees the request reference and accurate next steps.
+3. Confirm customer and shop emails arrive through SMTP. Simulate SMTP failure; confirm the order remains visible to the owner and failed jobs are logged/retried.
+4. In the owner Shop → Orders view, confirm a request is marked paid only after a real offline payment has been checked, and confirm cancellation works. Verify the public order status reflects the shop's action.
+5. Confirm manual-mode shipping is arranged directly by the shop and customer; the app must not show or invoke Courier Guy shipment booking for a manual order.
+6. If explicitly testing Paystack, switch `SHOP_PAYMENT_MODE=paystack_test`, configure only test credentials, and follow the Paystack test steps above.
+7. Test provider outages, failed/repeated test webhooks (only in Paystack test mode) and app/database restarts. Confirm queued notifications remain persisted and retry.
 8. Test shop tenant isolation: one owner cannot see another shop's orders, credentials, buyer addresses, messages or product data.
-9. Verify refunds, returns, cancellations, delivery exceptions and buyer support manually. The current app does not automate the full refund/return or shipment-cancellation lifecycle.
+9. Verify returns, cancellations, delivery exceptions and buyer support manually. The current app does not automate the full refund/return or shipment-cancellation lifecycle.
 
 ## 8. Production operations and monitoring
 
 Before launch, assign an operator to:
 
-- monitor application, database, SMTP, Paystack, Courier Guy and Meta errors;
+- monitor application, database and SMTP errors; monitor Paystack, Courier Guy and Meta only if those test/optional flows are enabled;
 - review queued/failed notification jobs and retries in the database/logs (there is no notification-delivery dashboard yet);
 - check backups and periodically test a restore;
 - renew HTTPS certificates and rotate access only through a planned secret migration;
@@ -216,11 +232,13 @@ Do not enable a public launch until every applicable item is checked:
 - [ ] Production domain, HTTPS, hosting proxy and correct `APP_URL` tested.
 - [ ] Unique production `SESSION_SECRET`; no development placeholder values.
 - [ ] Production database isolated from public access, backed up, restorable and using non-default credentials.
+- [ ] App configured with a persistent production PostgreSQL connection; in-memory storage is not used.
 - [ ] Production migrations applied without deleting any database volume/data.
 - [ ] Both encryption keys recorded securely; existing Courier Guy key preserved.
-- [ ] SMTP/domain authentication tested; payment receipt and pickup reminder delivered.
-- [ ] Paystack end-to-end test, webhook signature, verification, duplicates and failed payments tested.
-- [ ] Live payment mode implemented and separately reviewed before accepting real money.
+- [ ] SMTP/domain authentication tested; manual order acknowledgement and owner alert delivered and failed notifications observable.
+- [ ] Manual order request, owner payment confirmation, cancellation and direct fulfilment instructions tested.
+- [ ] Paystack test flow and webhook signature, verification, duplicates and failed payments tested only if `SHOP_PAYMENT_MODE=paystack_test` is enabled.
+- [ ] Live payments are not available. Do not collect customer funds through the app until an approved live-payment design is implemented and separately reviewed.
 - [ ] Courier Guy rates, shipment booking, collection window, locker handling, tracking and ETA tested with the actual account.
 - [ ] Each shop has the intended production WhatsApp number/token and approved exact-language templates.
 - [ ] Buyer opt-in, order confirmation, tracking update and owner reminders tested end to end.

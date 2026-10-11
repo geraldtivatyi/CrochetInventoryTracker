@@ -7,6 +7,7 @@ export interface AuthUser {
   email: string;
   otpEnabled: boolean;
   isOwner: boolean;
+  defaultHourlyRate: number | null;
 }
 
 interface MeResponse {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { insertProjectSchema } from "@shared/schema";
+import { projectDetailsSchema } from "@shared/schema";
 import { Project, Yarn } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -30,11 +30,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import YarnForm from "@/components/inventory/yarn-form";
 
 // Extend the project schema with additional validation
-const projectFormSchema = insertProjectSchema.extend({
+const projectFormSchema = projectDetailsSchema.extend({
   name: z.string().min(2, { message: "Name must be at least 2 characters" }),
   category: z.string().min(1, { message: "Please select a category" }),
   ballsNeeded: z.number().int().min(1, { message: "Must need at least 1 ball" }),
   timeToMake: z.number().min(0.5, { message: "Time must be at least 0.5 hours" }),
+  yarnId: z.number().int().positive().nullable(),
 });
 
 type ProjectFormValues = z.infer<typeof projectFormSchema>;
@@ -69,14 +70,23 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
   const form = useForm<ProjectFormValues>({
     resolver: zodResolver(projectFormSchema),
     defaultValues: project 
-      ? { ...project } 
+      ? {
+          name: project.name,
+          category: project.category,
+          ballsNeeded: project.ballsNeeded,
+          preferredYarnType: project.preferredYarnType,
+          yarnId: project.yarnId,
+          timeToMake: project.timeToMake,
+          notes: project.notes,
+        }
       : {
           name: "",
           category: "",
           ballsNeeded: 0,
-          preferredYarnType: "",
+          preferredYarnType: null,
+          yarnId: null,
           timeToMake: 0,
-          notes: "",
+          notes: null,
         },
   });
   
@@ -104,7 +114,7 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
       console.error("Error saving project:", error);
       toast({
         title: "Error",
-        description: "There was a problem saving the project",
+        description: error instanceof Error ? error.message : "There was a problem saving the project",
         variant: "destructive",
       });
     } finally {
@@ -200,7 +210,7 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
             
             <FormField
               control={form.control}
-              name="preferredYarnType"
+                name="yarnId"
               render={({ field }) => (
                 <FormItem>
                   <div className="flex items-center justify-between">
@@ -216,8 +226,12 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
                     </Button>
                   </div>
                   <Select
-                    onValueChange={field.onChange}
-                    value={field.value || "none"}
+                    onValueChange={(value) => {
+                      const yarn = yarns.find((candidate) => candidate.id === Number(value));
+                      field.onChange(value === "none" ? null : Number(value));
+                      form.setValue("preferredYarnType", yarn ? `${yarn.type} - ${yarn.color}` : null);
+                    }}
+                    value={field.value?.toString() ?? "none"}
                   >
                     <FormControl>
                       <SelectTrigger id="project-yarn">
@@ -227,13 +241,13 @@ export default function ProjectForm({ project, onClose, onSuccess }: ProjectForm
                     <SelectContent>
                       <SelectItem value="none">No preference</SelectItem>
                       {yarns.map((yarn) => (
-                        <SelectItem key={`${yarn.type}-${yarn.color}`} value={`${yarn.type} - ${yarn.color}`}>
+                        <SelectItem key={yarn.id} value={yarn.id.toString()}>
                           <div className="flex items-center space-x-2">
                             <div 
                               className="w-3 h-3 rounded-full border border-neutral-300"
                               style={{ backgroundColor: yarn.colorHex }}
                             />
-                            <span>{yarn.type} - {yarn.color}</span>
+                            <span>{yarn.type} - {yarn.color} · {yarn.quantityInStock - yarn.reservedQuantity} available</span>
                           </div>
                         </SelectItem>
                       ))}

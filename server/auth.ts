@@ -114,7 +114,13 @@ function rateLimit(name: string, max: number, windowMs: number) {
   };
 }
 
-const toPublic = (u: User): PublicUser => ({ id: u.id, email: u.email, otpEnabled: u.otpEnabled, isOwner: u.isOwner });
+const toPublic = (u: User): PublicUser => ({
+  id: u.id,
+  email: u.email,
+  otpEnabled: u.otpEnabled,
+  isOwner: u.isOwner,
+  defaultHourlyRate: u.defaultHourlyRate,
+});
 
 function logIn(req: Request, user: User): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -201,6 +207,19 @@ export function authRouter() {
     handle(async (req, res) => {
       const user = await currentUser(req);
       res.json({ user: user ? toPublic(user) : null, needsSetup: !user && (await storage.countUsers()) === 0 });
+    }),
+  );
+
+  router.patch(
+    "/me/default-hourly-rate",
+    requireAuth,
+    handle(async (req, res) => {
+      const { defaultHourlyRate } = z.object({
+        defaultHourlyRate: z.number().finite().min(1).max(10000).nullable(),
+      }).parse(req.body);
+      const user = (req as any).user as User;
+      await storage.updateUser(user.id, { defaultHourlyRate });
+      res.json({ user: toPublic({ ...user, defaultHourlyRate }) });
     }),
   );
 

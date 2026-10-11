@@ -6,7 +6,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import ProjectCard from "@/components/projects/project-card";
 import ProjectForm from "@/components/projects/project-form";
 import { Project } from "@shared/schema";
-import { queryClient } from "@/lib/queryClient";
+import { Yarn } from "@shared/schema";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function Projects() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -16,6 +18,9 @@ export default function Projects() {
   // Fetch projects
   const { data: projects = [], isLoading: projectsLoading, error: projectsError } = useQuery<Project[]>({
     queryKey: ['/api/projects'],
+  });
+  const { data: yarns = [], isLoading: yarnsLoading, error: yarnsError } = useQuery<Yarn[]>({
+    queryKey: ['/api/yarns'],
   });
 
   // Handle edit button click
@@ -40,7 +45,17 @@ export default function Projects() {
 
   const totalProjects = projects.length;
   const avgTimeToMake = projects.length > 0 ? projects.reduce((sum, p) => sum + p.timeToMake, 0) / projects.length : 0;
-  const totalBallsRequired = projects.reduce((sum, project) => sum + project.ballsNeeded, 0);
+  const totalBallsRequired = projects.filter((project) => project.status === "pending").reduce((sum, project) => sum + project.ballsNeeded, 0);
+  const pendingDemand = new Map<number, number>();
+  for (const project of projects) {
+    if (project.status !== "pending" || project.yarnId === null) continue;
+    pendingDemand.set(project.yarnId, (pendingDemand.get(project.yarnId) ?? 0) + project.ballsNeeded);
+  }
+  const yarnShortfalls = yarns.flatMap((yarn) => {
+    const demand = pendingDemand.get(yarn.id) ?? 0;
+    const available = yarn.quantityInStock - yarn.reservedQuantity;
+    return demand > available ? [{ yarn, demand, available, shortfall: demand - available }] : [];
+  });
 
   return (
     <div>
@@ -82,9 +97,28 @@ export default function Projects() {
             </CardHeader>
             <CardContent className="pt-0">
               <div className="text-2xl font-bold">{totalBallsRequired} balls</div>
+              <p className="text-xs text-neutral-500">Across pending projects</p>
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {!yarnsLoading && !yarnsError && yarnShortfalls.length > 0 && (
+        <Alert className="mb-6 border-amber-200 bg-amber-50 text-amber-950">
+          <i className="ri-information-line text-amber-700"></i>
+          <AlertDescription>
+            <strong>A gentle stock reminder:</strong> If you start all your pending projects, you’ll need more yarn:
+            {" "}{yarnShortfalls.map(({ yarn, demand, available, shortfall }) =>
+              `${yarn.type} - ${yarn.color}: ${demand} needed, ${available} available (short ${shortfall})`,
+            ).join("; ")}.
+            Starting a project will reserve its yarn; you can add stock before starting projects that are short.
+          </AlertDescription>
+        </Alert>
+      )}
+      {yarnsError && (
+        <Alert className="mb-6 border-amber-200 bg-amber-50 text-amber-950">
+          <AlertDescription>Inventory could not be loaded, so pending project yarn requirements can’t be compared with stock right now.</AlertDescription>
+        </Alert>
       )}
 
       {/* Project Cards */}
@@ -101,6 +135,7 @@ export default function Projects() {
             <ProjectCard
               key={project.id}
               project={project}
+              yarns={yarns}
               onEdit={handleEditProject}
             />
           ))

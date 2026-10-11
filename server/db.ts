@@ -15,6 +15,7 @@ import {
   Shop,
   ShopOrder,
   NotificationJob,
+  ProjectDetails,
   users,
   authTokens,
   shops,
@@ -34,6 +35,7 @@ import {
   type ShopProductImage,
   type ShopProductRecord,
   type ShopProductView,
+  type ProjectActionResult,
 } from "./storage";
 
 const databaseUrl = process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -81,6 +83,7 @@ const ensureAuthTables = (async () => {
     expires_at timestamp NOT NULL,
     created_at timestamp NOT NULL DEFAULT now()
   )`);
+  await db.execute(sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS default_hourly_rate real`);
 })();
 
 const ensureShopTables = (async () => {
@@ -126,6 +129,7 @@ const ensureShopTables = (async () => {
   )`);
   await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS image_data bytea`);
   await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS image_mime_type text`);
+  await db.execute(sql`ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS unit_cost real`);
   await db.execute(sql`ALTER TABLE shops ADD COLUMN IF NOT EXISTS theme_color text NOT NULL DEFAULT '#6b4f3f'`);
   await db.execute(sql`ALTER TABLE shops ADD COLUMN IF NOT EXISTS whatsapp_phone_number_id text`);
   await db.execute(sql`ALTER TABLE shops ADD COLUMN IF NOT EXISTS whatsapp_access_token_encrypted text`);
@@ -149,6 +153,7 @@ const ensureShopTables = (async () => {
     quote_id text NOT NULL UNIQUE,
     reference text NOT NULL UNIQUE,
     status text NOT NULL DEFAULT 'pending',
+    payment_method text NOT NULL DEFAULT 'paystack_test',
     amount_kobo integer NOT NULL,
     currency text NOT NULL DEFAULT 'ZAR',
     customer jsonb NOT NULL,
@@ -159,6 +164,7 @@ const ensureShopTables = (async () => {
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now()
   )`);
+  await db.execute(sql`ALTER TABLE shop_orders ADD COLUMN IF NOT EXISTS payment_method text NOT NULL DEFAULT 'paystack_test'`);
   await db.execute(sql`CREATE TABLE IF NOT EXISTS notification_jobs (
     id serial PRIMARY KEY,
     dedupe_key text NOT NULL UNIQUE,
@@ -175,6 +181,23 @@ const ensureShopTables = (async () => {
     created_at timestamp NOT NULL DEFAULT now(),
     updated_at timestamp NOT NULL DEFAULT now()
   )`);
+})();
+
+const ensureProjectInventoryColumns = (async () => {
+  await db.execute(sql`ALTER TABLE yarns ADD COLUMN IF NOT EXISTS reserved_quantity integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS yarn_id integer`);
+  await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'pending'`);
+  await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS reserved_balls integer NOT NULL DEFAULT 0`);
+  await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS balls_used integer`);
+  await db.execute(sql`UPDATE projects AS p
+    SET yarn_id = (
+      SELECT y.id FROM yarns AS y
+      WHERE p.preferred_yarn_type = y.type || ' - ' || y.color
+         OR p.preferred_yarn_type = y.type
+      ORDER BY CASE WHEN p.preferred_yarn_type = y.type || ' - ' || y.color THEN 0 ELSE 1 END
+      LIMIT 1
+    )
+    WHERE p.yarn_id IS NULL AND p.preferred_yarn_type IS NOT NULL`);
 })();
 
 export class DatabaseStorage implements IStorage {
@@ -296,6 +319,7 @@ export class DatabaseStorage implements IStorage {
         name: shopProducts.name,
         description: shopProducts.description,
         price: shopProducts.price,
+        unitCost: shopProducts.unitCost,
         parcelLengthCm: shopProducts.parcelLengthCm,
         parcelWidthCm: shopProducts.parcelWidthCm,
         parcelHeightCm: shopProducts.parcelHeightCm,
@@ -392,11 +416,21 @@ export class DatabaseStorage implements IStorage {
   }
   async updateShopOrder(
     reference: string,
-    data: Partial<Pick<ShopOrder, "status" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
+    data: Partial<Pick<ShopOrder, "status" | "paymentMethod" | "paystackTransactionId" | "paystackAuthorizationUrl" | "delivery">>,
   ): Promise<ShopOrder | undefined> {
     await ensureShopTables;
     return (await db.update(shopOrders).set({ ...data, updatedAt: new Date() })
       .where(eq(shopOrders.reference, reference)).returning())[0];
+  }
+  async resolveManualShopOrder(shopId: number, reference: string, status: "paid" | "cancelled"): Promise<ShopOrder | undefined> {
+    await ensureShopTables;
+    return (await db.update(shopOrders).set({ status, updatedAt: new Date() })
+      .where(and(
+        eq(shopOrders.reference, reference),
+        eq(shopOrders.shopId, shopId),
+        eq(shopOrders.paymentMethod, "manual"),
+        eq(shopOrders.status, "pending"),
+      )).returning())[0];
   }
   async enqueueNotification(data: Omit<NotificationJob, "id" | "createdAt" | "updatedAt">): Promise<void> {
     await ensureShopTables;
@@ -450,56 +484,191 @@ export class DatabaseStorage implements IStorage {
 
   // Yarn methods
   async getAllYarns(): Promise<Yarn[]> {
+    await ensureProjectInventoryColumns;
     return await db.select().from(yarns);
   }
 
   async getYarn(id: number): Promise<Yarn | undefined> {
+    await ensureProjectInventoryColumns;
     const result = await db.select().from(yarns).where(eq(yarns.id, id)).limit(1);
     return result[0];
   }
 
   async createYarn(yarn: InsertYarn): Promise<Yarn> {
+    await ensureProjectInventoryColumns;
     const result = await db.insert(yarns).values(yarn).returning();
     return result[0];
   }
 
   async updateYarn(id: number, yarn: Partial<InsertYarn>): Promise<Yarn | undefined> {
-    const result = await db.update(yarns).set(yarn).where(eq(yarns.id, id)).returning();
+    await ensureProjectInventoryColumns;
+    const result = await db.update(yarns).set(yarn).where(and(
+      eq(yarns.id, id),
+      yarn.quantityInStock === undefined
+        ? sql`true`
+        : sql`${yarn.quantityInStock} >= ${yarns.reservedQuantity}`,
+    )).returning();
     return result[0];
   }
 
   async deleteYarn(id: number): Promise<boolean> {
-    const result = await db.delete(yarns).where(eq(yarns.id, id));
+    await ensureProjectInventoryColumns;
+    const result = await db.execute(sql`DELETE FROM yarns AS y
+      WHERE y.id = ${id}
+        AND y.reserved_quantity = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM projects AS p
+          WHERE p.yarn_id = y.id AND p.status IN ('pending', 'in_progress')
+        )
+      RETURNING y.id`);
     return result.rowCount > 0;
   }
 
   async getLowStockYarns(threshold: number): Promise<Yarn[]> {
-    return await db.select().from(yarns).where(lte(yarns.quantityInStock, threshold));
+    await ensureProjectInventoryColumns;
+    return await db.select().from(yarns).where(sql`${yarns.quantityInStock} - ${yarns.reservedQuantity} <= ${threshold}`);
   }
 
   // Project methods
   async getAllProjects(): Promise<Project[]> {
+    await ensureProjectInventoryColumns;
     return await db.select().from(projects);
   }
 
   async getProject(id: number): Promise<Project | undefined> {
+    await ensureProjectInventoryColumns;
     const result = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
     return result[0];
   }
 
-  async createProject(project: InsertProject): Promise<Project> {
+  async createProject(project: ProjectDetails): Promise<Project> {
+    await ensureProjectInventoryColumns;
     const result = await db.insert(projects).values(project).returning();
     return result[0];
   }
 
-  async updateProject(id: number, project: Partial<InsertProject>): Promise<Project | undefined> {
-    const result = await db.update(projects).set(project).where(eq(projects.id, id)).returning();
+  async updateProject(id: number, project: Partial<ProjectDetails>): Promise<Project | undefined> {
+    await ensureProjectInventoryColumns;
+    const result = await db.update(projects).set(project).where(and(eq(projects.id, id), eq(projects.status, "pending"))).returning();
     return result[0];
   }
 
+  async startProject(id: number): Promise<ProjectActionResult> {
+    await ensureProjectInventoryColumns;
+    await db.execute(sql`WITH candidate AS MATERIALIZED (
+      SELECT id, yarn_id, balls_needed FROM projects
+      WHERE id = ${id} AND status = 'pending'
+      FOR UPDATE
+    ), reserve_yarn AS (
+      UPDATE yarns AS y
+      SET reserved_quantity = y.reserved_quantity + candidate.balls_needed
+      FROM candidate
+      WHERE y.id = candidate.yarn_id
+        AND y.quantity_in_stock - y.reserved_quantity >= candidate.balls_needed
+      RETURNING y.id
+    )
+    UPDATE projects AS p
+    SET status = 'in_progress',
+        reserved_balls = CASE WHEN candidate.yarn_id IS NULL THEN 0 ELSE candidate.balls_needed END
+    FROM candidate
+    WHERE p.id = candidate.id
+      AND (candidate.yarn_id IS NULL OR EXISTS (SELECT 1 FROM reserve_yarn))`);
+    const project = await this.getProject(id);
+    if (project?.status === "in_progress") return { project };
+    if (!project) return { reason: "not_found" };
+    if (project.status !== "pending") return { reason: "invalid_status" };
+    if (project.yarnId !== null) {
+      const yarn = await this.getYarn(project.yarnId);
+      if (!yarn) return { reason: "yarn_not_found" };
+      if (yarn.quantityInStock - yarn.reservedQuantity < project.ballsNeeded) return { reason: "insufficient_stock" };
+    }
+    return { reason: "invalid_status" };
+  }
+
+  async completeProject(id: number, ballsUsed: number): Promise<ProjectActionResult> {
+    await ensureProjectInventoryColumns;
+    await db.execute(sql`WITH candidate AS MATERIALIZED (
+      SELECT id, yarn_id, reserved_balls FROM projects
+      WHERE id = ${id} AND status = 'in_progress'
+      FOR UPDATE
+    ), release_yarn AS (
+      UPDATE yarns AS y
+      SET reserved_quantity = y.reserved_quantity - candidate.reserved_balls,
+          quantity_in_stock = y.quantity_in_stock - ${ballsUsed}
+      FROM candidate
+      WHERE y.id = candidate.yarn_id
+        AND y.reserved_quantity >= candidate.reserved_balls
+        AND y.quantity_in_stock - y.reserved_quantity >= GREATEST(${ballsUsed} - candidate.reserved_balls, 0)
+      RETURNING y.id
+    )
+    UPDATE projects AS p
+    SET status = 'completed', balls_used = ${ballsUsed}, reserved_balls = 0
+    FROM candidate
+    WHERE p.id = candidate.id
+      AND (candidate.yarn_id IS NULL OR EXISTS (SELECT 1 FROM release_yarn))`);
+    const project = await this.getProject(id);
+    if (project?.status === "completed") return { project };
+    if (!project) return { reason: "not_found" };
+    if (project.status !== "in_progress") return { reason: "invalid_status" };
+    if (project.yarnId !== null) {
+      const yarn = await this.getYarn(project.yarnId);
+      if (!yarn) return { reason: "yarn_not_found" };
+      if (yarn.quantityInStock - yarn.reservedQuantity < Math.max(0, ballsUsed - project.reservedBalls)) {
+        return { reason: "insufficient_stock" };
+      }
+    }
+    return { reason: "invalid_status" };
+  }
+
+  async cancelProject(id: number): Promise<ProjectActionResult> {
+    await ensureProjectInventoryColumns;
+    await db.execute(sql`WITH candidate AS MATERIALIZED (
+      SELECT id, yarn_id, status, reserved_balls FROM projects
+      WHERE id = ${id} AND status IN ('pending', 'in_progress')
+      FOR UPDATE
+    ), release_yarn AS (
+      UPDATE yarns AS y
+      SET reserved_quantity = y.reserved_quantity - candidate.reserved_balls
+      FROM candidate
+      WHERE candidate.status = 'in_progress'
+        AND y.id = candidate.yarn_id
+        AND y.reserved_quantity >= candidate.reserved_balls
+      RETURNING y.id
+    )
+    UPDATE projects AS p
+    SET status = 'cancelled', reserved_balls = 0
+    FROM candidate
+    WHERE p.id = candidate.id
+      AND (candidate.status = 'pending' OR candidate.yarn_id IS NULL OR EXISTS (SELECT 1 FROM release_yarn))`);
+    const project = await this.getProject(id);
+    if (project?.status === "cancelled") return { project };
+    if (!project) return { reason: "not_found" };
+    if (project.status !== "pending" && project.status !== "in_progress") return { reason: "invalid_status" };
+    if (project.yarnId !== null && project.status === "in_progress" && !(await this.getYarn(project.yarnId))) {
+      return { reason: "yarn_not_found" };
+    }
+    return { reason: "invalid_status" };
+  }
+
   async deleteProject(id: number): Promise<boolean> {
-    const result = await db.delete(projects).where(eq(projects.id, id));
-    return result.rowCount > 0;
+    await ensureProjectInventoryColumns;
+    const result = await db.execute(sql`WITH candidate AS MATERIALIZED (
+      SELECT id, yarn_id, status, reserved_balls FROM projects WHERE id = ${id} FOR UPDATE
+    ), release_yarn AS (
+      UPDATE yarns AS y
+      SET reserved_quantity = y.reserved_quantity - candidate.reserved_balls
+      FROM candidate
+      WHERE candidate.status = 'in_progress'
+        AND y.id = candidate.yarn_id
+        AND y.reserved_quantity >= candidate.reserved_balls
+      RETURNING y.id
+    )
+    DELETE FROM projects AS p
+    USING candidate
+    WHERE p.id = candidate.id
+      AND (candidate.status <> 'in_progress' OR candidate.yarn_id IS NULL OR EXISTS (SELECT 1 FROM release_yarn))
+    RETURNING p.id`);
+    return result.rows.length > 0;
   }
 
   // Price calculation methods

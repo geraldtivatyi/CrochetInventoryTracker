@@ -12,11 +12,13 @@ export const yarns = pgTable("yarns", {
   colorHex: text("color_hex").notNull(),
   costPerBall: real("cost_per_ball").notNull(),
   quantityInStock: integer("quantity_in_stock").notNull(),
+  reservedQuantity: integer("reserved_quantity").notNull().default(0),
   notes: text("notes"),
 });
 
 export const insertYarnSchema = createInsertSchema(yarns).omit({
   id: true,
+  reservedQuantity: true,
 });
 
 export type InsertYarn = z.infer<typeof insertYarnSchema>;
@@ -29,15 +31,27 @@ export const projects = pgTable("projects", {
   category: text("category").notNull(),
   ballsNeeded: integer("balls_needed").notNull(),
   preferredYarnType: text("preferred_yarn_type"),
+  yarnId: integer("yarn_id"),
   timeToMake: real("time_to_make").notNull(),
   notes: text("notes"),
+  status: text("status").$type<"pending" | "in_progress" | "completed" | "cancelled">().notNull().default("pending"),
+  reservedBalls: integer("reserved_balls").notNull().default(0),
+  ballsUsed: integer("balls_used"),
 });
 
-export const insertProjectSchema = createInsertSchema(projects).omit({
-  id: true,
+export const projectDetailsSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  category: z.string().trim().min(1).max(80),
+  ballsNeeded: z.number().int().min(1).max(10000),
+  preferredYarnType: z.string().trim().max(160).nullable().default(null),
+  yarnId: z.number().int().positive().nullable().default(null),
+  timeToMake: z.number().finite().min(0.5).max(10000),
+  notes: z.string().max(2000).nullable().default(null),
 });
+export const insertProjectSchema = projectDetailsSchema;
 
 export type InsertProject = z.infer<typeof insertProjectSchema>;
+export type ProjectDetails = InsertProject;
 export type Project = typeof projects.$inferSelect;
 
 // Price calculations table
@@ -95,6 +109,7 @@ export type ActivityLog = typeof activityLogs.$inferSelect;
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   email: text("email").notNull().unique(),
+  defaultHourlyRate: real("default_hourly_rate"),
   passwordHash: text("password_hash").notNull(),
   otpEnabled: boolean("otp_enabled").notNull().default(false),
   isOwner: boolean("is_owner").notNull().default(false),
@@ -104,7 +119,7 @@ export const users = pgTable("users", {
 });
 
 export type User = typeof users.$inferSelect;
-export type PublicUser = Pick<User, "id" | "email" | "otpEnabled" | "isOwner">;
+export type PublicUser = Pick<User, "id" | "email" | "otpEnabled" | "isOwner" | "defaultHourlyRate">;
 
 // One-time tokens: password resets and email OTP codes (only hashes are stored)
 export const authTokens = pgTable("auth_tokens", {
@@ -180,6 +195,7 @@ export const shopProducts = pgTable("shop_products", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   price: real("price").notNull(),
+  unitCost: real("unit_cost"),
   parcelLengthCm: real("parcel_length_cm"),
   parcelWidthCm: real("parcel_width_cm"),
   parcelHeightCm: real("parcel_height_cm"),
@@ -199,7 +215,8 @@ export const shopOrders = pgTable("shop_orders", {
   shopId: integer("shop_id").notNull(),
   quoteId: text("quote_id").notNull().unique(),
   reference: text("reference").notNull().unique(),
-  status: text("status").$type<"pending" | "paid" | "failed">().notNull().default("pending"),
+  status: text("status").$type<"pending" | "paid" | "failed" | "cancelled">().notNull().default("pending"),
+  paymentMethod: text("payment_method").$type<"manual" | "paystack_test">().notNull().default("paystack_test"),
   amountKobo: integer("amount_kobo").notNull(),
   currency: text("currency").notNull().default("ZAR"),
   customer: jsonb("customer").$type<{
@@ -214,10 +231,11 @@ export const shopOrders = pgTable("shop_orders", {
     name: string;
     unitPrice: number;
     quantity: number;
+    unitCost?: number | null;
   }>>().notNull(),
   delivery: jsonb("delivery").$type<{
     method: "collection" | "courier" | "locker";
-    feeKobo: number;
+    feeKobo: number | null;
     address?: ShopAddress;
     pickupPoint?: { id: string | number; name: string; address?: string };
     serviceLevelCode?: string;
@@ -259,7 +277,7 @@ export const notificationJobs = pgTable("notification_jobs", {
   shopId: integer("shop_id").notNull(),
   orderReference: text("order_reference").notNull(),
   channel: text("channel").$type<"email" | "whatsapp">().notNull(),
-  kind: text("kind").$type<"order_receipt" | "tracking_update" | "pickup_reminder">().notNull(),
+  kind: text("kind").$type<"order_receipt" | "order_request" | "tracking_update" | "pickup_reminder">().notNull(),
   recipient: text("recipient").notNull(),
   payload: jsonb("payload").$type<Record<string, string | string[]>>().notNull(),
   runAt: timestamp("run_at").notNull(),
@@ -308,6 +326,13 @@ export const shopSettingsSchema = z.object({
   (shop) => !shop.customDomain || /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(shop.customDomain),
   { message: "Enter a valid custom hostname", path: ["customDomain"] },
 ).superRefine((shop, ctx) => {
+  if (shop.isLive && !emailSchema.safeParse(shop.senderEmail).success) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A valid shop contact email is required before publishing",
+      path: ["senderEmail"],
+    });
+  }
   if (shop.brandingImage && shop.removeBrandingImage) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
@@ -343,6 +368,7 @@ export const shopProductSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(2000).default(""),
   price: z.number().finite().positive().max(10000000),
+  unitCost: z.number().finite().nonnegative().max(10000000).nullable().default(null),
   parcelLengthCm: z.number().finite().positive().max(300).nullable().default(null),
   parcelWidthCm: z.number().finite().positive().max(300).nullable().default(null),
   parcelHeightCm: z.number().finite().positive().max(300).nullable().default(null),
@@ -376,9 +402,6 @@ export const checkoutQuoteSchema = z.object({
 }).superRefine((checkout, ctx) => {
   if (checkout.method === "courier" && !checkout.address) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter a delivery address", path: ["address"] });
-  }
-  if (checkout.method === "locker" && !checkout.pickupPoint) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Choose a pickup point", path: ["pickupPoint"] });
   }
 });
 
